@@ -40,12 +40,17 @@ class TestChatAPI(unittest.TestCase):
             )
         )
 
-        self.assertTrue(response["success"])
-        self.assertTrue(response["task_id"])
+        self.assertTrue(
+            response["success"]
+        )
+
+        self.assertTrue(
+            response["task_id"]
+        )
 
         self.assertEqual(
             response["task_status"],
-            "pending",
+            TaskStatus.PENDING.value,
         )
 
         self.assertEqual(
@@ -58,10 +63,12 @@ class TestChatAPI(unittest.TestCase):
         )
 
         self.assertIsNotNone(record)
+
         self.assertEqual(
             record.status,
             TaskStatus.PENDING,
         )
+
         self.assertEqual(
             record.command,
             "open chrome",
@@ -87,18 +94,25 @@ class TestChatAPI(unittest.TestCase):
         }
 
         response = chat(
-            ChatRequest(message="hi mama")
+            ChatRequest(
+                message="hi mama"
+            )
         )
 
         self.assertEqual(
             response["response"],
             "Hello! How can I help?",
         )
-        self.assertIsNone(response["task_id"])
+
+        self.assertIsNone(
+            response["task_id"]
+        )
+
         self.assertEqual(
             response["task_status"],
             "completed",
         )
+
         self.assertIsNone(
             response["queue_status"]
         )
@@ -110,7 +124,9 @@ class TestChatAPI(unittest.TestCase):
             HTTPException
         ) as context:
             chat(
-                ChatRequest(message="   ")
+                ChatRequest(
+                    message="   "
+                )
             )
 
         self.assertEqual(
@@ -142,11 +158,15 @@ class TestChatAPI(unittest.TestCase):
             )
         )
 
-        self.assertTrue(response["task_id"])
+        self.assertTrue(
+            response["task_id"]
+        )
+
         self.assertEqual(
             response["intent"],
             "web_search",
         )
+
         self.assertEqual(
             response["queue_status"],
             "queued",
@@ -186,7 +206,11 @@ class TestChatAPI(unittest.TestCase):
 
         records = engine.registry.list()
 
-        self.assertEqual(len(records), 1)
+        self.assertEqual(
+            len(records),
+            1,
+        )
+
         self.assertEqual(
             records[0].status,
             TaskStatus.CANCELLED,

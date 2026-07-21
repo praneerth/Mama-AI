@@ -3,9 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
-from app.core.approval_registry import (
-    ApprovalRegistry,
-)
+from app.core.approval_registry import ApprovalRegistry
 from app.core.engine import MamaEngine
 from app.core.event_bus import EventBus
 from app.core.risk_policy import RiskPolicy
@@ -63,6 +61,8 @@ class TestDurableQueueIntegration(unittest.TestCase):
             owner_id="local-user",
         )
 
+        first_registry.disable_persistence()
+
         restarted_registry = TaskRegistry()
 
         restarted_registry.enable_persistence(
@@ -76,6 +76,7 @@ class TestDurableQueueIntegration(unittest.TestCase):
         )
 
         self.assertIsNotNone(restored)
+
         self.assertEqual(
             restored.status,
             TaskStatus.PENDING,
@@ -85,7 +86,7 @@ class TestDurableQueueIntegration(unittest.TestCase):
             return_value="Notepad opened."
         )
 
-        engine = MamaEngine(
+        execution_engine = MamaEngine(
             executor=executor,
             bus=EventBus(),
             registry=restarted_registry,
@@ -94,31 +95,33 @@ class TestDurableQueueIntegration(unittest.TestCase):
         )
 
         worker = DurableTaskWorker(
-            execution_engine=engine,
+            execution_engine=execution_engine,
             queue_store=self.queue_store,
             worker_id="restart-worker",
         )
 
         report = worker.process_next()
 
-        completed_task = (
-            restarted_registry.get(
-                request.task_id
-            )
+        completed_task = restarted_registry.get(
+            request.task_id
         )
 
         queue_record = self.queue_store.get(
             request.task_id
         )
 
+        self.assertIsNotNone(report)
+
         self.assertEqual(
             report.task_status,
             TaskStatus.SUCCEEDED.value,
         )
+
         self.assertEqual(
             completed_task.status,
             TaskStatus.SUCCEEDED,
         )
+
         self.assertEqual(
             queue_record["status"],
             "completed",
