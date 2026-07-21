@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from app.core.event_bus import EventBus, event_bus
 from app.core.task import TaskRequest, TaskResult
+from app.core.task_registry import TaskRegistry, task_registry
 
 
 CommandExecutor = Callable[[str], Any]
@@ -20,9 +21,9 @@ CommandExecutor = Callable[[str], Any]
 
 class MamaEngine:
     """
-    Central engine for executing every Mama AI task.
+    Central engine for every Mama AI task.
 
-    API, GUI, voice and future mobile clients should use this same engine.
+    API, GUI, voice and future mobile clients use this engine.
     """
 
     def __init__(
@@ -30,10 +31,16 @@ class MamaEngine:
         executor: CommandExecutor | None = None,
         logger: logging.Logger | None = None,
         bus: EventBus | None = None,
+        registry: TaskRegistry | None = None,
     ) -> None:
         self._executor = executor
         self._logger = logger or logging.getLogger("mama_ai.engine")
         self._event_bus = bus or event_bus
+        self._task_registry = registry or task_registry
+
+    @property
+    def registry(self) -> TaskRegistry:
+        return self._task_registry
 
     def _get_executor(self) -> CommandExecutor:
         if self._executor is None:
@@ -121,6 +128,29 @@ class MamaEngine:
             source="engine",
         )
 
+    def _register_and_start(
+        self,
+        request: TaskRequest,
+    ) -> str | None:
+        try:
+            self._task_registry.register(request)
+
+            running_record = self._task_registry.mark_running(
+                request.task_id
+            )
+
+            return running_record.started_at
+
+        except Exception as exc:
+            self._logger.exception(
+                "Task registration failed | id=%s",
+                request.task_id,
+            )
+
+            raise RuntimeError(
+                f"Task registry rejected the task: {exc}"
+            ) from exc
+
     def execute(
         self,
         task: TaskRequest | str,
@@ -138,6 +168,7 @@ class MamaEngine:
                     autonomy_level=autonomy_level,
                 )
             )
+
         except Exception as exc:
             task_id = uuid4().hex
 
@@ -152,6 +183,25 @@ class MamaEngine:
                 message=result.message,
                 error=str(exc),
                 stage="validation",
+            )
+
+            return result
+
+        try:
+            started_at = self._register_and_start(request)
+
+        except Exception as exc:
+            result = TaskResult.failed(
+                task_id=request.task_id,
+                message="Mama AI could not register the task.",
+                error=str(exc),
+            )
+
+            self._publish_failed(
+                task_id=request.task_id,
+                message=result.message,
+                error=str(exc),
+                stage="registration",
             )
 
             return result
@@ -186,6 +236,11 @@ class MamaEngine:
                 ],
             )
 
+            if started_at is not None:
+                result.started_at = started_at
+
+            self._task_registry.complete(result)
+
             self._logger.info(
                 "Task succeeded | id=%s",
                 request.task_id,
@@ -206,6 +261,17 @@ class MamaEngine:
                 message="Mama AI could not complete the task.",
                 error=str(exc),
             )
+
+            if started_at is not None:
+                result.started_at = started_at
+
+            try:
+                self._task_registry.complete(result)
+            except Exception:
+                self._logger.exception(
+                    "Failed to finalize task registry record | id=%s",
+                    request.task_id,
+                )
 
             self._publish_failed(
                 task_id=request.task_id,
