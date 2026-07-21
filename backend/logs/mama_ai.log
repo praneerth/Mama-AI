@@ -236,3 +236,8 @@
 2026-07-21 10:34:00 | INFO | mama_ai | Home endpoint accessed
 2026-07-21 10:34:00 | INFO | mama_ai | [092b421d] 200 (35.54 ms)
 2026-07-21 10:34:16 | INFO | mama_ai | ========== Mama AI Backend Stopped ==========
+2026-07-21 10:38:04 | INFO | mama_ai | ========== Mama AI Backend Started ==========
+2026-07-21 10:38:11 | INFO | mama_ai | [5ce7d0d5] GET /
+2026-07-21 10:38:11 | INFO | mama_ai | Home endpoint accessed
+2026-07-21 10:38:11 | INFO | mama_ai | [5ce7d0d5] 200 (45.69 ms)
+2026-07-21 10:38:20 | INFO | mama_ai | ========== Mama AI Backend Stopped ==========

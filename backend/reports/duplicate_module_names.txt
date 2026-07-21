@@ -4,15 +4,9 @@ authentication.py
 confidence_engine.py
     app.cognition.confidence_engine
     app.reasoning.confidence_engine
-coordinator.py
-    app.multi_agent.coordinator
-    app.orchestration.coordinator
 decision.py
     app.agent.decision
     app.verifier.decision
-dispatcher.py
-    app.agent.dispatcher
-    app.multi_agent.dispatcher
 exceptions.py
     app.core.exceptions
     app.exceptions
@@ -86,9 +80,6 @@ smart_click.py
 smart_scroll.py
     app.browser.smart_scroll
     app.desktop.smart_scroll
-task_queue.py
-    app.multi_agent.task_queue
-    app.planner.task_queue
 ui_detector.py
     app.desktop.ui_detector
     app.ui.ui_detector

@@ -1,3 +1,4 @@
+app.cognition.cognitive_loop -> app.multi_agent.coordinator
 app.planner.verifier -> app.vision.text_reader
 app.tools.tool_manager -> app.tools.automation
 app.tools.tool_manager -> app.tools.cursor
