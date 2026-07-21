@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.approvals import router as approvals_router
 from app.api.chat import router as chat_router
 from app.api.health import router as health_router
 from app.api.history import router as history_router
@@ -48,6 +49,7 @@ app.include_router(health_router)
 app.include_router(history_router)
 app.include_router(memory_router)
 app.include_router(tasks_router)
+app.include_router(approvals_router)
 
 @app.get("/")
 def home():
