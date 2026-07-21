@@ -468,18 +468,112 @@ class SQLiteTaskQueueStore:
         finally:
             connection.close()
 
-    def cancel(
+    def cancel_queued(
         self,
         task_id: str,
     ) -> dict[str, Any]:
+        """
+        Cancel a task only while it is still queued.
+
+        This operation is atomic. It refuses cancellation after a
+        worker has claimed the task, preventing cancellation races
+        with command execution.
+        """
+
         task_id = self._validate_text(
             task_id,
             "Task ID",
         )
 
         now = self._now().isoformat()
+        connection = self._connect()
 
-        with self._connect() as connection:
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+
+            cursor = connection.execute(
+                f"""
+                UPDATE {QUEUE_TABLE}
+                SET
+                    status = 'cancelled',
+                    worker_id = NULL,
+                    lease_expires_at = NULL,
+                    updated_at = ?
+                WHERE
+                    task_id = ?
+                    AND status = 'queued'
+                """,
+                (
+                    now,
+                    task_id,
+                ),
+            )
+
+            if cursor.rowcount == 0:
+                row = connection.execute(
+                    f"""
+                    SELECT *
+                    FROM {QUEUE_TABLE}
+                    WHERE task_id = ?
+                    """,
+                    (task_id,),
+                ).fetchone()
+
+                if row is None:
+                    raise KeyError(
+                        f"Queued task was not found: {task_id}"
+                    )
+
+                raise ValueError(
+                    "Task cannot be safely cancelled "
+                    "from queue status "
+                    f"{row['status']}."
+                )
+
+            updated = connection.execute(
+                f"""
+                SELECT *
+                FROM {QUEUE_TABLE}
+                WHERE task_id = ?
+                """,
+                (task_id,),
+            ).fetchone()
+
+            connection.commit()
+
+            result = self._row_to_dict(updated)
+
+            if result is None:
+                raise RuntimeError(
+                    "Cancelled queue record could not be loaded."
+                )
+
+            return result
+
+        except Exception:
+            connection.rollback()
+            raise
+
+        finally:
+            connection.close()
+
+    def cancel(
+        self,
+        task_id: str,
+    ) -> dict[str, Any]:
+        """Cancel a queued or claimed task for internal reconciliation."""
+
+        task_id = self._validate_text(
+            task_id,
+            "Task ID",
+        )
+
+        now = self._now().isoformat()
+        connection = self._connect()
+
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+
             cursor = connection.execute(
                 f"""
                 UPDATE {QUEUE_TABLE}
@@ -499,19 +593,51 @@ class SQLiteTaskQueueStore:
             )
 
             if cursor.rowcount == 0:
-                record = self.get(task_id)
+                row = connection.execute(
+                    f"""
+                    SELECT *
+                    FROM {QUEUE_TABLE}
+                    WHERE task_id = ?
+                    """,
+                    (task_id,),
+                ).fetchone()
 
-                if record is None:
+                if row is None:
                     raise KeyError(
                         f"Queued task was not found: {task_id}"
                     )
 
                 raise ValueError(
                     "Task cannot be cancelled from queue "
-                    f"status {record['status']}."
+                    f"status {row['status']}."
                 )
 
-        return self.require(task_id)
+            updated = connection.execute(
+                f"""
+                SELECT *
+                FROM {QUEUE_TABLE}
+                WHERE task_id = ?
+                """,
+                (task_id,),
+            ).fetchone()
+
+            connection.commit()
+
+            result = self._row_to_dict(updated)
+
+            if result is None:
+                raise RuntimeError(
+                    "Cancelled queue record could not be loaded."
+                )
+
+            return result
+
+        except Exception:
+            connection.rollback()
+            raise
+
+        finally:
+            connection.close()
 
     def get(
         self,
