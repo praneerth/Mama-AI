@@ -2,12 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.core.approval_registry import (
-    ApprovalRegistry,
-)
-from app.core.runtime_state import (
-    RuntimeStateManager,
-)
+from app.core.approval_registry import ApprovalRegistry
+from app.core.runtime_state import RuntimeStateManager
 from app.core.task import (
     RiskLevel,
     TaskRequest,
@@ -109,6 +105,7 @@ class TestRuntimeStateManager(unittest.TestCase):
         )
 
         self.tasks.register(request)
+
         self.tasks.mark_waiting_approval(
             request.task_id
         )
@@ -143,16 +140,21 @@ class TestRuntimeStateManager(unittest.TestCase):
             summary["restored_approvals"],
             1,
         )
-        self.assertEqual(
-            restored_tasks.get(
-                request.task_id
-            ).status,
-            TaskStatus.WAITING_APPROVAL,
+
+        restored_task = restored_tasks.get(
+            request.task_id
         )
-        self.assertIsNotNone(
-            restored_approvals.get(
-                approval.approval_id
-            )
+
+        restored_approval = restored_approvals.get(
+            approval.approval_id
+        )
+
+        self.assertIsNotNone(restored_task)
+        self.assertIsNotNone(restored_approval)
+
+        self.assertEqual(
+            restored_task.status,
+            TaskStatus.WAITING_APPROVAL,
         )
 
         restarted.stop()
@@ -190,10 +192,13 @@ class TestRuntimeStateManager(unittest.TestCase):
             request.task_id
         )
 
+        self.assertIsNotNone(restored)
+
         self.assertEqual(
             restored.status,
             TaskStatus.FAILED,
         )
+
         self.assertIn(
             "restart",
             restored.error.lower(),
@@ -201,8 +206,47 @@ class TestRuntimeStateManager(unittest.TestCase):
 
         restarted.stop()
 
+    def test_pending_task_remains_pending_after_restart(self):
+        self.manager.start(
+            recover_interrupted=False
+        )
+
+        request = TaskRequest(
+            command="open notepad"
+        )
+
+        self.tasks.register(request)
+        self.manager.stop()
+
+        restored_tasks = TaskRegistry()
+        restored_approvals = ApprovalRegistry()
+
+        restarted = RuntimeStateManager(
+            tasks=restored_tasks,
+            approvals=restored_approvals,
+            store=self.store,
+        )
+
+        restarted.start(
+            recover_interrupted=True
+        )
+
+        restored = restored_tasks.get(
+            request.task_id
+        )
+
+        self.assertIsNotNone(restored)
+
+        self.assertEqual(
+            restored.status,
+            TaskStatus.PENDING,
+        )
+
+        restarted.stop()
+
     def test_stop_disables_persistence(self):
         self.manager.start()
+
         summary = self.manager.stop()
 
         self.assertTrue(summary["stopped"])

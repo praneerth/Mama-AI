@@ -26,6 +26,7 @@ from app.database.state_db import (
 
 
 class RuntimeWorker(Protocol):
+    """Worker interface required by RuntimeStateManager."""
 
     @property
     def running(self) -> bool:
@@ -46,7 +47,7 @@ class RuntimeStateManager:
     """
     Coordinate persistent registries and the durable task worker.
 
-    Startup and shutdown are idempotent.
+    Startup and shutdown operations are idempotent.
     """
 
     def __init__(
@@ -77,7 +78,7 @@ class RuntimeStateManager:
         Restore persistent state and start the durable worker.
 
         Running tasks interrupted by a restart are marked failed.
-        Pending durable tasks remain available to the queue worker.
+        Pending tasks remain available for durable queue execution.
         """
 
         with self._lock:
@@ -89,12 +90,12 @@ class RuntimeStateManager:
                     "restored_approvals": len(
                         self._approvals.list()
                     ),
+                    "worker_started": False,
                     "worker_running": (
                         self._worker.running
                         if self._worker is not None
                         else False
                     ),
-                    "worker_started": False,
                     "database_path": self._store.database_path,
                 }
 
@@ -105,9 +106,7 @@ class RuntimeStateManager:
                     self._tasks.enable_persistence(
                         self._store,
                         restore=True,
-                        recover_interrupted=(
-                            recover_interrupted
-                        ),
+                        recover_interrupted=recover_interrupted,
                     )
                 )
 
@@ -130,7 +129,6 @@ class RuntimeStateManager:
 
                 self._approvals.disable_persistence()
                 self._tasks.disable_persistence()
-
                 raise
 
             self._started = True
@@ -153,7 +151,7 @@ class RuntimeStateManager:
         """
         Stop the durable worker and disable persistence.
 
-        Saved SQLite records are preserved.
+        Existing SQLite records remain stored.
         """
 
         with self._lock:
