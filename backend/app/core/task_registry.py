@@ -88,7 +88,10 @@ class TaskRecord:
     finished_at: str | None = None
 
     @classmethod
-    def from_request(cls, request: TaskRequest) -> "TaskRecord":
+    def from_request(
+        cls,
+        request: TaskRequest,
+    ) -> "TaskRecord":
         return cls(
             task_id=request.task_id,
             command=request.command,
@@ -156,7 +159,7 @@ class TaskRecord:
 
         if status not in allowed:
             raise ValueError(
-                f"Invalid task transition: "
+                "Invalid task transition: "
                 f"{self.status.value} -> {status.value}"
             )
 
@@ -169,13 +172,19 @@ class TaskRecord:
         if error is not None:
             self.error = str(error)
 
-        if status == TaskStatus.RUNNING and self.started_at is None:
+        if (
+            status == TaskStatus.RUNNING
+            and self.started_at is None
+        ):
             self.started_at = self.updated_at
 
         if status in TERMINAL_STATUSES:
             self.finished_at = self.updated_at
 
-    def apply_result(self, result: TaskResult) -> None:
+    def apply_result(
+        self,
+        result: TaskResult,
+    ) -> None:
         if result.task_id != self.task_id:
             raise ValueError(
                 "Task result ID does not match the registered task."
@@ -241,12 +250,16 @@ class TaskRegistry:
                 "A task persistence store is required."
             )
 
-        if not callable(getattr(store, "save_task", None)):
+        if not callable(
+            getattr(store, "save_task", None)
+        ):
             raise TypeError(
                 "Task store must provide save_task()."
             )
 
-        if not callable(getattr(store, "list_tasks", None)):
+        if not callable(
+            getattr(store, "list_tasks", None)
+        ):
             raise TypeError(
                 "Task store must provide list_tasks()."
             )
@@ -279,9 +292,9 @@ class TaskRegistry:
         """
         Restore task records from persistent storage.
 
-        When recover_interrupted is true, pending and running tasks are
-        marked failed because this version does not yet have a durable
-        task queue capable of resuming them after a restart.
+        When recover_interrupted is true, tasks that were already
+        running are marked failed. Pending tasks remain pending because
+        the durable queue can resume them after restart.
         """
 
         store = self._require_store()
@@ -295,11 +308,7 @@ class TaskRegistry:
 
             if (
                 recover_interrupted
-                and record.status
-                in {
-                    TaskStatus.PENDING,
-                    TaskStatus.RUNNING,
-                }
+                and record.status == TaskStatus.RUNNING
             ):
                 record.transition(
                     TaskStatus.FAILED,
@@ -321,7 +330,10 @@ class TaskRegistry:
 
         return len(restored)
 
-    def register(self, request: TaskRequest) -> TaskRecord:
+    def register(
+        self,
+        request: TaskRequest,
+    ) -> TaskRecord:
         if not isinstance(request, TaskRequest):
             raise TypeError(
                 "Only TaskRequest objects can be registered."
@@ -330,7 +342,7 @@ class TaskRegistry:
         with self._lock:
             if request.task_id in self._records:
                 raise ValueError(
-                    f"Task is already registered: "
+                    "Task is already registered: "
                     f"{request.task_id}"
                 )
 
@@ -339,20 +351,37 @@ class TaskRegistry:
 
             try:
                 self._persist_locked(record)
+
             except Exception:
-                self._records.pop(request.task_id, None)
+                self._records.pop(
+                    request.task_id,
+                    None,
+                )
                 raise
 
             return deepcopy(record)
 
-    def get(self, task_id: str) -> TaskRecord | None:
-        task_id = self._validate_task_id(task_id)
+    def get(
+        self,
+        task_id: str,
+    ) -> TaskRecord | None:
+        task_id = self._validate_task_id(
+            task_id
+        )
 
         with self._lock:
             record = self._records.get(task_id)
-            return deepcopy(record) if record else None
 
-    def require(self, task_id: str) -> TaskRecord:
+            return (
+                deepcopy(record)
+                if record is not None
+                else None
+            )
+
+    def require(
+        self,
+        task_id: str,
+    ) -> TaskRecord:
         record = self.get(task_id)
 
         if record is None:
@@ -362,7 +391,10 @@ class TaskRegistry:
 
         return record
 
-    def mark_running(self, task_id: str) -> TaskRecord:
+    def mark_running(
+        self,
+        task_id: str,
+    ) -> TaskRecord:
         return self._transition(
             task_id,
             TaskStatus.RUNNING,
@@ -390,18 +422,24 @@ class TaskRegistry:
             message=message,
         )
 
-    def complete(self, result: TaskResult) -> TaskRecord:
+    def complete(
+        self,
+        result: TaskResult,
+    ) -> TaskRecord:
         if not isinstance(result, TaskResult):
             raise TypeError(
                 "complete() requires a TaskResult."
             )
 
         with self._lock:
-            record = self._records.get(result.task_id)
+            record = self._records.get(
+                result.task_id
+            )
 
             if record is None:
                 raise KeyError(
-                    f"Task was not found: {result.task_id}"
+                    "Task was not found: "
+                    f"{result.task_id}"
                 )
 
             previous = deepcopy(record)
@@ -409,8 +447,11 @@ class TaskRegistry:
             try:
                 record.apply_result(result)
                 self._persist_locked(record)
+
             except Exception:
-                self._records[result.task_id] = previous
+                self._records[
+                    result.task_id
+                ] = previous
                 raise
 
             return deepcopy(record)
@@ -421,10 +462,16 @@ class TaskRegistry:
         status: TaskStatus | str | None = None,
         limit: int | None = None,
     ) -> list[TaskRecord]:
-        if limit is not None and limit < 1:
-            raise ValueError(
-                "Limit must be greater than zero."
-            )
+        if limit is not None:
+            if not isinstance(limit, int):
+                raise TypeError(
+                    "Limit must be an integer."
+                )
+
+            if limit < 1:
+                raise ValueError(
+                    "Limit must be greater than zero."
+                )
 
         required_status = (
             TaskStatus(status)
@@ -433,17 +480,22 @@ class TaskRegistry:
         )
 
         with self._lock:
-            records = list(self._records.values())
+            records = list(
+                self._records.values()
+            )
 
             if required_status is not None:
                 records = [
                     record
                     for record in records
-                    if record.status == required_status
+                    if record.status
+                    == required_status
                 ]
 
             records.sort(
-                key=lambda record: record.created_at,
+                key=lambda record: (
+                    record.created_at
+                ),
                 reverse=True,
             )
 
@@ -456,7 +508,9 @@ class TaskRegistry:
         self,
         status: TaskStatus | str | None = None,
     ) -> int:
-        return len(self.list(status=status))
+        return len(
+            self.list(status=status)
+        )
 
     def clear(self) -> None:
         """
@@ -476,7 +530,9 @@ class TaskRegistry:
         message: str | None = None,
         error: str | None = None,
     ) -> TaskRecord:
-        task_id = self._validate_task_id(task_id)
+        task_id = self._validate_task_id(
+            task_id
+        )
 
         with self._lock:
             record = self._records.get(task_id)
@@ -513,7 +569,9 @@ class TaskRegistry:
         store = self._require_store()
         store.save_task(record)
 
-    def _require_store(self) -> TaskStateStore:
+    def _require_store(
+        self,
+    ) -> TaskStateStore:
         with self._lock:
             if (
                 not self._persistence_enabled
@@ -526,14 +584,20 @@ class TaskRegistry:
             return self._store
 
     @staticmethod
-    def _validate_task_id(task_id: str) -> str:
+    def _validate_task_id(
+        task_id: str,
+    ) -> str:
         if not isinstance(task_id, str):
-            raise TypeError("Task ID must be text.")
+            raise TypeError(
+                "Task ID must be text."
+            )
 
         task_id = task_id.strip()
 
         if not task_id:
-            raise ValueError("Task ID cannot be empty.")
+            raise ValueError(
+                "Task ID cannot be empty."
+            )
 
         return task_id
 

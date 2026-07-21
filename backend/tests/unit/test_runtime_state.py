@@ -5,7 +5,9 @@ from pathlib import Path
 from app.core.approval_registry import (
     ApprovalRegistry,
 )
-from app.core.runtime_state import RuntimeStateManager
+from app.core.runtime_state import (
+    RuntimeStateManager,
+)
 from app.core.task import (
     RiskLevel,
     TaskRequest,
@@ -15,10 +17,38 @@ from app.core.task_registry import TaskRegistry
 from app.database.state_db import SQLiteStateStore
 
 
+class FakeWorker:
+
+    def __init__(self):
+        self._running = False
+        self.start_calls = 0
+        self.stop_calls = 0
+
+    @property
+    def running(self):
+        return self._running
+
+    def start(self):
+        self.start_calls += 1
+
+        if self._running:
+            return False
+
+        self._running = True
+        return True
+
+    def stop(self, *, timeout=5.0):
+        self.stop_calls += 1
+        self._running = False
+        return True
+
+
 class TestRuntimeStateManager(unittest.TestCase):
 
     def setUp(self):
-        self.temp_directory = tempfile.TemporaryDirectory()
+        self.temp_directory = (
+            tempfile.TemporaryDirectory()
+        )
 
         self.database_path = (
             Path(self.temp_directory.name)
@@ -46,7 +76,9 @@ class TestRuntimeStateManager(unittest.TestCase):
         summary = self.manager.start()
 
         self.assertTrue(summary["started"])
-        self.assertFalse(summary["already_started"])
+        self.assertFalse(
+            summary["already_started"]
+        )
         self.assertTrue(
             self.tasks.persistence_enabled
         )
@@ -86,9 +118,6 @@ class TestRuntimeStateManager(unittest.TestCase):
             owner_id="user-1",
             command=request.command,
             risk_level=RiskLevel.HIGH,
-            reasons=[
-                "File deletion requires approval."
-            ],
         )
 
         self.manager.stop()
@@ -96,22 +125,14 @@ class TestRuntimeStateManager(unittest.TestCase):
         restored_tasks = TaskRegistry()
         restored_approvals = ApprovalRegistry()
 
-        restarted_manager = RuntimeStateManager(
+        restarted = RuntimeStateManager(
             tasks=restored_tasks,
             approvals=restored_approvals,
             store=self.store,
         )
 
-        summary = restarted_manager.start(
+        summary = restarted.start(
             recover_interrupted=False
-        )
-
-        restored_task = restored_tasks.get(
-            request.task_id
-        )
-
-        restored_approval = restored_approvals.get(
-            approval.approval_id
         )
 
         self.assertEqual(
@@ -122,14 +143,19 @@ class TestRuntimeStateManager(unittest.TestCase):
             summary["restored_approvals"],
             1,
         )
-        self.assertIsNotNone(restored_task)
-        self.assertIsNotNone(restored_approval)
         self.assertEqual(
-            restored_task.status,
+            restored_tasks.get(
+                request.task_id
+            ).status,
             TaskStatus.WAITING_APPROVAL,
         )
+        self.assertIsNotNone(
+            restored_approvals.get(
+                approval.approval_id
+            )
+        )
 
-        restarted_manager.stop()
+        restarted.stop()
 
     def test_interrupted_running_task_becomes_failed(self):
         self.manager.start(
@@ -150,13 +176,13 @@ class TestRuntimeStateManager(unittest.TestCase):
         restored_tasks = TaskRegistry()
         restored_approvals = ApprovalRegistry()
 
-        restarted_manager = RuntimeStateManager(
+        restarted = RuntimeStateManager(
             tasks=restored_tasks,
             approvals=restored_approvals,
             store=self.store,
         )
 
-        restarted_manager.start(
+        restarted.start(
             recover_interrupted=True
         )
 
@@ -164,7 +190,6 @@ class TestRuntimeStateManager(unittest.TestCase):
             request.task_id
         )
 
-        self.assertIsNotNone(restored)
         self.assertEqual(
             restored.status,
             TaskStatus.FAILED,
@@ -174,7 +199,7 @@ class TestRuntimeStateManager(unittest.TestCase):
             restored.error.lower(),
         )
 
-        restarted_manager.stop()
+        restarted.stop()
 
     def test_stop_disables_persistence(self):
         self.manager.start()
@@ -191,6 +216,40 @@ class TestRuntimeStateManager(unittest.TestCase):
             self.approvals.persistence_enabled
         )
         self.assertFalse(self.manager.started)
+
+    def test_worker_lifecycle_is_managed(self):
+        worker = FakeWorker()
+
+        manager = RuntimeStateManager(
+            tasks=TaskRegistry(),
+            approvals=ApprovalRegistry(),
+            store=self.store,
+            worker=worker,
+        )
+
+        started = manager.start()
+
+        self.assertTrue(
+            started["worker_started"]
+        )
+        self.assertTrue(
+            started["worker_running"]
+        )
+        self.assertEqual(
+            worker.start_calls,
+            1,
+        )
+
+        stopped = manager.stop()
+
+        self.assertTrue(
+            stopped["worker_stopped"]
+        )
+        self.assertEqual(
+            worker.stop_calls,
+            1,
+        )
+        self.assertFalse(worker.running)
 
 
 if __name__ == "__main__":

@@ -1,14 +1,11 @@
 """
-Runtime persistence lifecycle for Mama AI.
-
-This module activates persistent task and approval registries during
-application startup and disables database writes during shutdown.
+Runtime persistence and durable-worker lifecycle for Mama AI.
 """
 
 from __future__ import annotations
 
 from threading import RLock
-from typing import Any
+from typing import Any, Protocol
 
 from app.core.approval_registry import (
     ApprovalRegistry,
@@ -18,18 +15,38 @@ from app.core.task_registry import (
     TaskRegistry,
     task_registry,
 )
+from app.core.task_worker import (
+    DurableTaskWorker,
+    task_worker,
+)
 from app.database.state_db import (
     SQLiteStateStore,
     state_store,
 )
 
 
+class RuntimeWorker(Protocol):
+
+    @property
+    def running(self) -> bool:
+        ...
+
+    def start(self) -> bool:
+        ...
+
+    def stop(
+        self,
+        *,
+        timeout: float = 5.0,
+    ) -> bool:
+        ...
+
+
 class RuntimeStateManager:
     """
-    Coordinate persistent task and approval state.
+    Coordinate persistent registries and the durable task worker.
 
-    Startup is idempotent, so repeated startup calls in the same
-    process will not restore or attach the registries twice.
+    Startup and shutdown are idempotent.
     """
 
     def __init__(
@@ -37,10 +54,12 @@ class RuntimeStateManager:
         tasks: TaskRegistry,
         approvals: ApprovalRegistry,
         store: SQLiteStateStore,
+        worker: RuntimeWorker | None = None,
     ) -> None:
         self._tasks = tasks
         self._approvals = approvals
         self._store = store
+        self._worker = worker
         self._lock = RLock()
         self._started = False
 
@@ -55,11 +74,10 @@ class RuntimeStateManager:
         recover_interrupted: bool = True,
     ) -> dict[str, Any]:
         """
-        Enable persistence and restore saved runtime state.
+        Restore persistent state and start the durable worker.
 
-        Running and pending tasks from a previous stopped process are
-        marked failed when recover_interrupted is true because Mama AI
-        does not yet have a durable background task queue.
+        Running tasks interrupted by a restart are marked failed.
+        Pending durable tasks remain available to the queue worker.
         """
 
         with self._lock:
@@ -71,15 +89,25 @@ class RuntimeStateManager:
                     "restored_approvals": len(
                         self._approvals.list()
                     ),
+                    "worker_running": (
+                        self._worker.running
+                        if self._worker is not None
+                        else False
+                    ),
+                    "worker_started": False,
                     "database_path": self._store.database_path,
                 }
+
+            worker_started = False
 
             try:
                 restored_tasks = (
                     self._tasks.enable_persistence(
                         self._store,
                         restore=True,
-                        recover_interrupted=recover_interrupted,
+                        recover_interrupted=(
+                            recover_interrupted
+                        ),
                     )
                 )
 
@@ -90,9 +118,19 @@ class RuntimeStateManager:
                     )
                 )
 
+                if self._worker is not None:
+                    worker_started = self._worker.start()
+
             except Exception:
+                if (
+                    self._worker is not None
+                    and self._worker.running
+                ):
+                    self._worker.stop(timeout=5)
+
                 self._approvals.disable_persistence()
                 self._tasks.disable_persistence()
+
                 raise
 
             self._started = True
@@ -102,14 +140,20 @@ class RuntimeStateManager:
                 "already_started": False,
                 "restored_tasks": restored_tasks,
                 "restored_approvals": restored_approvals,
+                "worker_started": worker_started,
+                "worker_running": (
+                    self._worker.running
+                    if self._worker is not None
+                    else False
+                ),
                 "database_path": self._store.database_path,
             }
 
     def stop(self) -> dict[str, Any]:
         """
-        Disable future persistence writes.
+        Stop the durable worker and disable persistence.
 
-        Records already saved in SQLite are preserved.
+        Saved SQLite records are preserved.
         """
 
         with self._lock:
@@ -122,9 +166,17 @@ class RuntimeStateManager:
                 return {
                     "stopped": True,
                     "already_stopped": True,
+                    "worker_stopped": True,
                     "tasks_in_memory": task_count,
                     "approvals_in_memory": approval_count,
                 }
+
+            worker_stopped = True
+
+            if self._worker is not None:
+                worker_stopped = self._worker.stop(
+                    timeout=30
+                )
 
             self._approvals.disable_persistence()
             self._tasks.disable_persistence()
@@ -133,6 +185,7 @@ class RuntimeStateManager:
             return {
                 "stopped": True,
                 "already_stopped": False,
+                "worker_stopped": worker_stopped,
                 "tasks_in_memory": task_count,
                 "approvals_in_memory": approval_count,
             }
@@ -142,6 +195,7 @@ runtime_state = RuntimeStateManager(
     tasks=task_registry,
     approvals=approval_registry,
     store=state_store,
+    worker=task_worker,
 )
 
 
@@ -149,7 +203,7 @@ def initialize_runtime_state(
     *,
     recover_interrupted: bool = True,
 ) -> dict[str, Any]:
-    """Activate persistent runtime state."""
+    """Restore state and start runtime services."""
 
     return runtime_state.start(
         recover_interrupted=recover_interrupted
@@ -157,13 +211,14 @@ def initialize_runtime_state(
 
 
 def shutdown_runtime_state() -> dict[str, Any]:
-    """Disable persistent runtime state safely."""
+    """Stop runtime services safely."""
 
     return runtime_state.stop()
 
 
 __all__ = [
     "RuntimeStateManager",
+    "RuntimeWorker",
     "initialize_runtime_state",
     "runtime_state",
     "shutdown_runtime_state",
