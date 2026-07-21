@@ -1,0 +1,262 @@
+app.agent.agent
+    -> app.core.mama
+app.agent.ai_engine
+    -> app.llm.provider
+app.agent.autonomous_runner
+    -> app.agent.goal_scheduler
+app.agent.brain
+    -> app.ai.providers.gemini
+app.agent.experience
+    -> app.database
+    -> app.database.experience_db
+app.agent.goal_scheduler
+    -> app.database
+    -> app.database.goals_db
+app.agent.goals
+    -> app.database
+    -> app.database.goals_db
+app.agent.intent_classifier
+    -> app.ai.providers.gemini
+app.agent.learner
+    -> app.database
+    -> app.database.experience_db
+app.agent.main_agent
+    -> app.agent.goals
+    -> app.core.mama
+app.agent.memory_manager
+    -> app.database
+    -> app.database.memory_db
+app.agent.scheduler
+    -> app.agent.decision
+    -> app.agent.state
+app.ai.providers.gemini
+    -> app.config
+    -> app.config.settings
+app.api.chat
+    -> app.core.mama
+    -> app.services.ai_pipeline
+app.api.health
+    -> app.config
+    -> app.config.settings
+app.api.history
+    -> app.memory.memory_manager
+app.api.memory
+    -> app.database
+    -> app.database.memory_db
+app.cognition.actor
+    -> app.tools.manager
+app.cognition.cognitive_loop
+    -> app.cognition.actor
+    -> app.cognition.learner
+    -> app.cognition.observer
+    -> app.cognition.planner
+    -> app.cognition.thinker
+    -> app.cognition.verifier
+    -> app.multi_agent.coordinator
+app.cognition.learner
+    -> app.database
+    -> app.database.experience_db
+app.cognition.planner
+    -> app.planner.planner
+app.cognition.thinker
+    -> app.ai.providers.gemini
+app.cognition.verifier
+    -> app.ai.providers.gemini
+app.commands.router
+    -> app.services.ai_service
+    -> app.tools.pc_control
+    -> app.tools.process_control
+    -> app.tools.screenshot_control
+    -> app.tools.smart_launcher
+    -> app.tools.web_control
+    -> app.tools.youtube_control
+    -> app.vision.camera_vision
+    -> app.vision.screen_reader
+app.config
+    -> app.config
+    -> app.config.logger
+    -> app.config.settings
+app.config.logger
+    -> app.config
+    -> app.config.settings
+app.controller.action_executor
+    -> app.tools.manager
+app.controller.desktop_controller
+    -> app.controller.action_executor
+    -> app.controller.memory_bridge
+    -> app.controller.planner_bridge
+    -> app.controller.state_manager
+    -> app.controller.task_queue
+    -> app.planner.recovery
+    -> app.planner.verifier
+app.controller.planner_bridge
+    -> app.planner.planner
+app.core.mama
+    -> app.commands.router
+app.core.shutdown
+    -> app.agent.experience
+    -> app.agent.goals
+app.core.startup
+    -> app.agent.experience
+    -> app.agent.goals
+    -> app.database.database
+    -> app.memory.memory_manager
+app.database.analytics_db
+    -> app.database.database
+app.database.experience_db
+    -> app.database.database
+    -> app.database.models
+app.database.goals_db
+    -> app.database.database
+    -> app.database.models
+app.database.learning_db
+    -> app.database.database
+app.database.memory_db
+    -> app.database.database
+    -> app.database.models
+app.database.migrations
+    -> app.database.database
+app.database.skills_db
+    -> app.database.database
+    -> app.database.models
+app.exceptions
+    -> app.config
+    -> app.config.logger
+app.gui.main_window
+    -> app.ui.main_window
+app.learning.action_memory
+    -> app.database.learning_db
+app.learning.learner
+    -> app.database.experience_db
+    -> app.database.learning_db
+app.llm.gemini
+    -> app.ai.providers.gemini
+app.llm.provider
+    -> app.ai.providers.gemini
+app.main
+    -> app.core.mama
+    -> app.core.shutdown
+    -> app.core.startup
+app.memory.long_term
+    -> app.database
+    -> app.database.memory_db
+app.middleware
+    -> app.middleware.request_logger
+app.middleware.request_logger
+    -> app.config
+    -> app.config.logger
+app.multi_agent.coordinator
+    -> app.multi_agent.agent_registry
+    -> app.multi_agent.browser_agent
+    -> app.multi_agent.coding_agent
+    -> app.multi_agent.desktop_agent
+    -> app.multi_agent.learning_agent
+    -> app.multi_agent.memory_agent
+    -> app.multi_agent.planner_agent
+    -> app.multi_agent.reasoning_agent
+    -> app.multi_agent.verification_agent
+    -> app.multi_agent.vision_agent
+    -> app.multi_agent.voice_agent
+app.multi_agent.desktop_agent
+    -> app.tools.manager
+app.multi_agent.learning_agent
+    -> app.database
+    -> app.database.experience_db
+app.multi_agent.memory_agent
+    -> app.database
+    -> app.database.memory_db
+app.multi_agent.planner_agent
+    -> app.planner.planner
+app.multi_agent.reasoning_agent
+    -> app.ai.providers.gemini
+app.multi_agent.verification_agent
+    -> app.cognition.verifier
+app.planner.executor
+    -> app.learning.self_correct
+    -> app.planner.planner
+    -> app.planner.verifier
+    -> app.tools.tool_router
+app.planner.goal_manager
+    -> app.planner.task_state
+app.planner.verifier
+    -> app.database.analytics_db
+    -> app.tools.screenshot
+    -> app.vision.text_reader
+app.services.ai_pipeline
+    -> app.agent.intent_classifier
+    -> app.database.learning_db
+    -> app.database.memory_db
+    -> app.services.ai_service
+app.services.ai_service
+    -> app.ai.prompts
+    -> app.ai.providers.gemini
+    -> app.memory.memory_manager
+    -> app.tools.manager
+app.tools.tool_manager
+    -> app.tools.automation
+    -> app.tools.browser
+    -> app.tools.cursor
+    -> app.tools.files
+    -> app.tools.keyboard
+    -> app.tools.mouse
+    -> app.tools.screenshot
+    -> app.tools.system
+    -> app.tools.ui_click
+    -> app.tools.ui_elements
+    -> app.tools.vision
+    -> app.tools.window_control
+app.tools.tool_router
+    -> app.tools.manager
+app.ui.main_window
+    -> app.commands.router
+    -> app.voice.speech_to_text
+    -> app.voice.tts
+app.ui.ocr_click
+    -> app.vision.capture
+    -> app.vision.ocr
+app.ui.ui_clicker
+    -> app.ui.ui_detector
+app.ui.ui_detector
+    -> app.tools.screenshot
+    -> app.ui.template_matcher
+    -> app.ui.ui_database
+app.verifier.hybrid_verifier
+    -> app.verifier.object_verifier
+    -> app.verifier.ocr_verifier
+    -> app.verifier.ui_verifier
+    -> app.verifier.vision_verifier
+app.verifier.object_verifier
+    -> app.tools.screenshot
+    -> app.vision.object_detector
+app.verifier.ocr_verifier
+    -> app.tools.screenshot
+    -> app.vision.text_reader
+app.verifier.ui_verifier
+    -> app.ui.ui_detector
+app.verifier.vision_verifier
+    -> app.tools.screenshot
+    -> app.vision.vision_ai
+app.vision.screen_reader
+    -> app.cognition.observer
+app.voice.assistant
+    -> app.services.ai_service
+    -> app.voice.recorder
+    -> app.voice.speaker
+    -> app.voice.transcriber
+    -> app.voice.wake_word
+main
+    -> app.api.chat
+    -> app.api.health
+    -> app.api.history
+    -> app.api.memory
+    -> app.config
+    -> app.config.logger
+    -> app.config.settings
+    -> app.exceptions
+    -> app.middleware
+run_gui
+    -> app.gui.main_window
+voice_assistant
+    -> app.commands.router
+    -> app.voice.speech_to_text
+    -> app.voice.tts

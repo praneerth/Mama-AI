@@ -1,0 +1,519 @@
+Folder PATH listing
+Volume serial number is 000001AF D077:04BF
+C:\USERS\HP\ONEDRIVE\DESKTOP\MAMA-AI\BACKEND\APP
+|   exceptions.py
+|   main.py
+|   __init__.py
+|   
++---agent
+|       action_selector.py
+|       agent.py
+|       agent_core.py
+|       ai_engine.py
+|       autonomous_runner.py
+|       brain.py
+|       decision.py
+|       dispatcher.py
+|       event_bus.py
+|       execution_engine.py
+|       experience.py
+|       feedback_engine.py
+|       goals.py
+|       goal_manager.py
+|       goal_scheduler.py
+|       intent_classifier.py
+|       learner.py
+|       main_agent.py
+|       memory_manager.py
+|       observation_engine.py
+|       perception.py
+|       permissions.py
+|       reasoning.py
+|       recovery.py
+|       replanner.py
+|       scheduler.py
+|       self_healing.py
+|       self_monitor.py
+|       session_manager.py
+|       skill_manager.py
+|       state.py
+|       state_manager.py
+|       task_manager.py
+|       watchdog.py
+|       __init__.py
+|       
++---ai
+|   |   prompts.py
+|   |   __init__.py
+|   |   
+|   \---providers
+|           gemini.py
+|           __init__.py
+|           
++---analytics
+|       analytics.py
+|       metrics.py
+|       reports.py
+|       usage.py
+|       __init__.py
+|       
++---api
+|       auth.py
+|       chat.py
+|       health.py
+|       history.py
+|       memory.py
+|       middleware.py
+|       routes.py
+|       websocket.py
+|       __init__.py
+|       
++---automation
+|       scheduler.py
+|       triggers.py
+|       workflows.py
+|       __init__.py
+|       
++---browser
+|       authentication.py
+|       browser_api.py
+|       browser_controller.py
+|       browser_factory.py
+|       browser_learning.py
+|       browser_logger.py
+|       browser_manager.py
+|       browser_memory.py
+|       browser_profile.py
+|       browser_session.py
+|       browser_state.py
+|       captcha_detector.py
+|       cookies.py
+|       dom_analyzer.py
+|       downloads.py
+|       error_recovery.py
+|       forms.py
+|       navigation.py
+|       page_parser.py
+|       popup_handler.py
+|       selector_engine.py
+|       smart_click.py
+|       smart_scroll.py
+|       smart_typing.py
+|       storage.py
+|       tabs.py
+|       uploads.py
+|       wait_engine.py
+|       windows.py
+|       __init__.py
+|       
++---cache
+|       cache.py
+|       redis_cache.py
+|       __init__.py
+|       
++---cognition
+|       actor.py
+|       cognitive_loop.py
+|       confidence_engine.py
+|       context.py
+|       decision_engine.py
+|       executor.py
+|       intent_engine.py
+|       learner.py
+|       long_term_memory.py
+|       observer.py
+|       pipeline.py
+|       planner.py
+|       reasoning_engine.py
+|       self_reflection.py
+|       task_decomposer.py
+|       thinker.py
+|       verifier.py
+|       working_memory.py
+|       world_model.py
+|       __init__.py
+|       
++---commands
+|       browser_commands.py
+|       router.py
+|       system_commands.py
+|       
++---config
+|       constants.py
+|       logging.py
+|       paths.py
+|       settings.py
+|       __init__.py
+|       
++---controller
+|       action_executor.py
+|       desktop_controller.py
+|       memory_bridge.py
+|       planner_bridge.py
+|       state_manager.py
+|       task_queue.py
+|       __init__.py
+|       
++---core
+|       dependency.py
+|       exceptions.py
+|       shutdown.py
+|       startup.py
+|       
++---data
+|       installed_apps.json
+|       
++---database
+|       analytics_db.py
+|       chat_db.py
+|       database.py
+|       experience_db.py
+|       goals_db.py
+|       learning_db.py
+|       mama_ai.db
+|       memory_db.py
+|       migrations.py
+|       models.py
+|       settings_db.py
+|       skills_db.py
+|       __init__.py
+|       
++---desktop
+|       application_manager.py
+|       clipboard_manager.py
+|       desktop_api.py
+|       desktop_logger.py
+|       desktop_manager.py
+|       device_manager.py
+|       explorer_manager.py
+|       file_operations.py
+|       keyboard_controller.py
+|       monitor_manager.py
+|       mouse_controller.py
+|       power_manager.py
+|       printer_manager.py
+|       process_manager.py
+|       screen_manager.py
+|       shortcut_manager.py
+|       smart_click.py
+|       smart_drag.py
+|       smart_scroll.py
+|       smart_type.py
+|       taskbar_manager.py
+|       ui_detector.py
+|       ui_elements.py
+|       window_manager.py
+|       __init__.py
+|       
++---execution
+|       executor.py
+|       pipeline.py
+|       rollback.py
+|       sandbox.py
+|       __init__.py
+|       
++---gui
+|       dashboard.py
+|       main_window.py
+|       settings.py
+|       widgets.py
+|       __init__.py
+|       
++---integrations
+|       calendar.py
+|       discord.py
+|       gmail.py
+|       slack.py
+|       telegram.py
+|       whatsapp.py
+|       __init__.py
+|       
++---learning
+|       action_memory.py
+|       evaluator.py
+|       learner.py
+|       memory_writer.py
+|       reinforcement.py
+|       reward.py
+|       self_correct.py
+|       skills.py
+|       trainer.py
+|       __init__.py
+|       
++---llm
+|       fallback.py
+|       gemini.py
+|       ollama.py
+|       openai.py
+|       prompt_manager.py
+|       provider.py
+|       __init__.py
+|       
++---memory
+|       context_builder.py
+|       conversation_memory.py
+|       embedding_manager.py
+|       episodic.py
+|       episodic_memory.py
+|       knowledge_graph.py
+|       long_term.py
+|       long_term_memory.py
+|       memory_cleanup.py
+|       memory_consolidation.py
+|       memory_manager.py
+|       memory_ranker.py
+|       procedural_memory.py
+|       retrieval_engine.py
+|       semantic.py
+|       semantic_memory.py
+|       short_term.py
+|       short_term_memory.py
+|       task_memory.py
+|       user_profile.py
+|       vector_store.py
+|       working_memory.py
+|       __init__.py
+|       
++---middleware
+|       request_logger.py
+|       __init__.py
+|       
++---models
++---monitoring
+|       diagnostics.py
+|       health.py
+|       profiler.py
+|       __init__.py
+|       
++---multi_agent
+|       agent_monitor.py
+|       agent_registry.py
+|       automation_agent.py
+|       browser_agent.py
+|       coding_agent.py
+|       communication.py
+|       coordinator.py
+|       desktop_agent.py
+|       dispatcher.py
+|       learning_agent.py
+|       load_balancer.py
+|       memory_agent.py
+|       planner_agent.py
+|       reasoning_agent.py
+|       safety_agent.py
+|       task_queue.py
+|       verification_agent.py
+|       vision_agent.py
+|       voice_agent.py
+|       __init__.py
+|       
++---orchestration
+|       controller.py
+|       coordinator.py
+|       coordinator_controller.py
+|       pipeline.py
+|       router.py
+|       __init__.py
+|       
++---planner
+|       executor.py
+|       goal_manager.py
+|       planner.py
+|       task_queue.py
+|       task_state.py
+|       verifier.py
+|       __init__.py
+|       
++---plugins
+|       loader.py
+|       manager.py
+|       registry.py
+|       __init__.py
+|       
++---reasoning
+|       causal_reasoner.py
+|       chain_of_thought.py
+|       confidence_engine.py
+|       context_reasoner.py
+|       decision_tree.py
+|       explanation_engine.py
+|       goal_reasoner.py
+|       memory_reasoner.py
+|       planner_optimizer.py
+|       priority_engine.py
+|       reasoning_engine.py
+|       replanner.py
+|       risk_analyzer.py
+|       self_critique.py
+|       self_reflection.py
+|       tool_reasoner.py
+|       tree_of_thought.py
+|       verifier_reasoner.py
+|       workflow_optimizer.py
+|       __init__.py
+|       
++---retrieval
+|       embeddings.py
+|       rag.py
+|       retriever.py
+|       __init__.py
+|       
++---security
+|       authentication.py
+|       authorization.py
+|       encryption.py
+|       permissions.py
+|       __init__.py
+|       
++---services
+|       ai_pipeline.py
+|       ai_service.py
+|       speech_service.py
+|       system_service.py
+|       vision_service.py
+|       __init__.py
+|       
++---skills
+|       installer.py
+|       registry.py
+|       updater.py
+|       __init__.py
+|       
++---testing
+|       benchmark.py
+|       regression.py
+|       stress_test.py
+|       __init__.py
+|       
++---tools
+|       api_tool.py
+|       audio_tool.py
+|       browser.py
+|       browser_tool.py
+|       calendar_tool.py
+|       clipboard.py
+|       clipboard_tool.py
+|       desktop_tool.py
+|       email_tool.py
+|       filesystem.py
+|       file_tool.py
+|       keyboard.py
+|       keyboard_tool.py
+|       manager.py
+|       mouse.py
+|       mouse_tool.py
+|       notification_tool.py
+|       ocr_tool.py
+|       pc_control.py
+|       plugin_manager.py
+|       process_control.py
+|       screenshot.py
+|       screenshot_control.py
+|       screenshot_tool.py
+|       search_tool.py
+|       smart_launcher.py
+|       terminal.py
+|       terminal_tool.py
+|       tool_logger.py
+|       tool_manager.py
+|       tool_permissions.py
+|       tool_registry.py
+|       tool_router.py
+|       vision_tool.py
+|       web_control.py
+|       web_tool.py
+|       window.py
+|       window_tool.py
+|       youtube_control.py
+|       __init__.py
+|       
++---ui
+|       chat_panel.py
+|       header.py
+|       input_panel.py
+|       main_window.py
+|       ocr_click.py
+|       template_matcher.py
+|       theme.py
+|       ui_clicker.py
+|       ui_database.py
+|       ui_detector.py
+|       __init__.py
+|       
++---utils
+|       file_utils.py
+|       helpers.py
+|       retry.py
+|       text_utils.py
+|       timer.py
+|       validator.py
+|       __init__.py
+|       
++---vector_store
+|       chroma.py
+|       faiss.py
+|       index.py
+|       __init__.py
+|       
++---verifier
+|       decision.py
+|       hybrid_verifier.py
+|       object_verifier.py
+|       ocr_verifier.py
+|       rules.py
+|       ui_verifier.py
+|       vision_verifier.py
+|       __init__.py
+|       
++---vision
+|       barcode_reader.py
+|       button_detector.py
+|       camera_vision.py
+|       color_detector.py
+|       detector.py
+|       document_reader.py
+|       face_detector.py
+|       icon_detector.py
+|       image_classifier.py
+|       image_processor.py
+|       layout_analyzer.py
+|       object_detector.py
+|       object_locator.py
+|       ocr.py
+|       ocr_engine.py
+|       pdf_reader.py
+|       qr_reader.py
+|       scene_understanding.py
+|       screenshot_manager.py
+|       screen_analyzer.py
+|       screen_capture.py
+|       screen_reader.py
+|       text_detector.py
+|       ui_detector.py
+|       vision_api.py
+|       vision_manager.py
+|       visual_learning.py
+|       visual_logger.py
+|       visual_memory.py
+|       visual_reasoner.py
+|       window_detector.py
+|       __init__.py
+|       
++---voice
+|       assistant.py
+|       commands.py
+|       listener.py
+|       recorder.py
+|       speaker.py
+|       speech_to_text.py
+|       transcriber.py
+|       tts.py
+|       wake_word.py
+|       __init__.py
+|       
+\---workflows
+        executor.py
+        templates.py
+        workflow_engine.py
+        __init__.py
+        

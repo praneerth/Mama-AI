@@ -1,0 +1,233 @@
+2026-07-10 10:40:32,872 | INFO | MamaAI | Mama AI started successfully.
+2026-07-10 10:40:32,872 | WARNING | MamaAI | This is a warning.
+2026-07-10 10:40:32,873 | ERROR | MamaAI | This is an error message.
+2026-07-10 10:53:44,804 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 10:53:56,619 | INFO | MamaAI | Home endpoint accessed
+2026-07-10 10:55:45,002 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 10:55:49,690 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 10:57:52,144 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 10:57:56,275 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 10:57:58,952 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 10:58:16,155 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 11:01:52,958 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 11:01:57,286 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 11:02:17,464 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 11:02:22,565 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 11:04:08,282 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 11:04:12,591 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 11:04:27,495 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 11:04:42,933 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 11:04:52,806 | INFO | MamaAI | [28238979] GET /health/
+2026-07-10 11:04:52,813 | INFO | MamaAI | [28238979] 307 (6.4 ms)
+2026-07-10 11:04:52,825 | INFO | MamaAI | [2de36dfe] GET /health
+2026-07-10 11:04:52,844 | INFO | MamaAI | [2de36dfe] 200 (18.6 ms)
+2026-07-10 11:07:19,794 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 11:16:17,747 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 11:16:19,944 | INFO | MamaAI | [9f7c3dc7] GET /docs
+2026-07-10 11:16:19,946 | INFO | MamaAI | [9f7c3dc7] 200 (2.0 ms)
+2026-07-10 11:16:20,309 | INFO | MamaAI | [7ca5d965] GET /openapi.json
+2026-07-10 11:16:20,370 | INFO | MamaAI | [7ca5d965] 200 (61.21 ms)
+2026-07-10 11:16:55,443 | INFO | MamaAI | [23eb6af3] POST /chat
+2026-07-10 11:17:01,760 | INFO | MamaAI | [23eb6af3] 200 (6317.38 ms)
+2026-07-10 11:20:21,062 | INFO | MamaAI | [59ef7020] POST /chat
+2026-07-10 11:20:21,067 | INFO | MamaAI | [59ef7020] 422 (3.09 ms)
+2026-07-10 11:22:27,359 | INFO | MamaAI | [08455a52] GET /docs
+2026-07-10 11:22:27,360 | INFO | MamaAI | [08455a52] 200 (1.0 ms)
+2026-07-10 11:22:27,749 | INFO | MamaAI | [41be76b7] GET /openapi.json
+2026-07-10 11:22:27,750 | INFO | MamaAI | [41be76b7] 200 (1.57 ms)
+2026-07-10 11:25:14,237 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 11:28:46,455 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 11:28:51,266 | INFO | MamaAI | [403aa8df] GET /docs
+2026-07-10 11:28:51,270 | INFO | MamaAI | [403aa8df] 200 (4.64 ms)
+2026-07-10 11:28:51,497 | INFO | MamaAI | [16366705] GET /openapi.json
+2026-07-10 11:28:51,519 | INFO | MamaAI | [16366705] 200 (21.83 ms)
+2026-07-10 11:30:06,654 | INFO | MamaAI | [413e41a8] GET /history
+2026-07-10 11:30:06,689 | INFO | MamaAI | [413e41a8] 200 (34.05 ms)
+2026-07-10 11:33:21,668 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 11:33:28,737 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 11:34:06,852 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 11:38:35,031 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 11:39:28,957 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 11:39:35,573 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 11:40:45,510 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 11:40:52,051 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 11:40:59,853 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 11:41:10,025 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 11:41:12,461 | INFO | MamaAI | [166fb3ca] GET /docs
+2026-07-10 11:41:12,464 | INFO | MamaAI | [166fb3ca] 200 (2.99 ms)
+2026-07-10 11:41:12,694 | INFO | MamaAI | [735de1b7] GET /openapi.json
+2026-07-10 11:41:12,775 | INFO | MamaAI | [735de1b7] 200 (81.01 ms)
+2026-07-10 11:48:31,230 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 11:48:36,684 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 11:50:04,338 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 11:50:11,297 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 11:50:21,391 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 11:50:33,923 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 11:50:34,171 | INFO | MamaAI | [be3cd40c] GET /docs
+2026-07-10 11:50:34,174 | INFO | MamaAI | [be3cd40c] 200 (3.15 ms)
+2026-07-10 11:50:34,401 | INFO | MamaAI | [f1b44d35] GET /openapi.json
+2026-07-10 11:50:34,428 | INFO | MamaAI | [f1b44d35] 200 (27.56 ms)
+2026-07-10 11:51:09,931 | INFO | MamaAI | [4a168580] POST /chat
+2026-07-10 11:51:10,037 | INFO | MamaAI | [4a168580] 200 (106.48 ms)
+2026-07-10 11:51:28,202 | INFO | MamaAI | [5288d003] POST /chat
+2026-07-10 11:51:28,270 | INFO | MamaAI | [5288d003] 200 (68.56 ms)
+2026-07-10 11:51:45,457 | INFO | MamaAI | [d6e6e425] POST /chat
+2026-07-10 11:51:45,491 | INFO | MamaAI | [d6e6e425] 200 (34.39 ms)
+2026-07-10 11:54:57,833 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 11:55:04,428 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 11:55:08,946 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 11:55:15,401 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 11:55:37,053 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 11:55:43,588 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 11:55:56,692 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 11:56:03,353 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 12:02:30,625 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 12:02:36,820 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 12:02:58,070 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 12:40:27,287 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 12:40:31,212 | INFO | MamaAI | [2918973e] GET /
+2026-07-10 12:40:31,253 | INFO | MamaAI | Home endpoint accessed
+2026-07-10 12:40:31,255 | INFO | MamaAI | [2918973e] 200 (43.08 ms)
+2026-07-10 12:42:07,719 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-10 12:42:17,520 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-10 12:42:26,418 | INFO | MamaAI | [61c5e6a6] GET /
+2026-07-10 12:42:26,456 | INFO | MamaAI | Home endpoint accessed
+2026-07-10 12:42:26,458 | INFO | MamaAI | [61c5e6a6] 200 (40.46 ms)
+2026-07-10 12:42:37,710 | INFO | MamaAI | [34ecdfe9] GET /
+2026-07-10 12:42:37,716 | INFO | MamaAI | Home endpoint accessed
+2026-07-10 12:42:37,719 | INFO | MamaAI | [34ecdfe9] 200 (9.08 ms)
+2026-07-10 12:42:41,000 | INFO | MamaAI | [b041164d] GET /docs
+2026-07-10 12:42:41,003 | INFO | MamaAI | [b041164d] 200 (3.14 ms)
+2026-07-10 12:42:41,260 | INFO | MamaAI | [d39f0e65] GET /openapi.json
+2026-07-10 12:42:41,282 | INFO | MamaAI | [d39f0e65] 200 (22.13 ms)
+2026-07-10 12:43:00,128 | INFO | MamaAI | [a1d3fcf1] POST /chat
+2026-07-10 12:43:00,218 | INFO | MamaAI | [a1d3fcf1] 200 (90.7 ms)
+2026-07-10 12:43:17,596 | INFO | MamaAI | [370de057] POST /chat
+2026-07-10 12:43:20,014 | INFO | MamaAI | [370de057] 200 (2418.08 ms)
+2026-07-10 12:44:05,300 | INFO | MamaAI | [0178b508] POST /chat
+2026-07-10 12:44:05,717 | INFO | MamaAI | [0178b508] 200 (416.36 ms)
+2026-07-10 12:44:28,855 | INFO | MamaAI | [ed8dcca8] POST /chat
+2026-07-10 12:44:30,766 | INFO | MamaAI | [ed8dcca8] 200 (1910.84 ms)
+2026-07-12 01:09:02,364 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-12 01:10:15,346 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-12 01:10:18,446 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-12 01:10:34,058 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-12 01:10:36,827 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-12 01:10:57,026 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-12 01:10:59,769 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-12 01:11:18,737 | INFO | MamaAI | [aa303bc6] GET /
+2026-07-12 01:11:18,758 | INFO | MamaAI | Home endpoint accessed
+2026-07-12 01:11:18,760 | INFO | MamaAI | [aa303bc6] 200 (22.81 ms)
+2026-07-12 01:11:19,797 | INFO | MamaAI | [cdae8bdf] GET /favicon.ico
+2026-07-12 01:11:19,798 | INFO | MamaAI | [cdae8bdf] 404 (2.0 ms)
+2026-07-12 01:12:00,972 | INFO | MamaAI | [330453fc] GET /
+2026-07-12 01:12:00,974 | INFO | MamaAI | Home endpoint accessed
+2026-07-12 01:12:00,976 | INFO | MamaAI | [330453fc] 200 (4.07 ms)
+2026-07-12 01:12:34,397 | INFO | MamaAI | [20d30b4a] GET /docs
+2026-07-12 01:12:34,398 | INFO | MamaAI | [20d30b4a] 200 (1.0 ms)
+2026-07-12 01:12:35,077 | INFO | MamaAI | [059cb51d] GET /openapi.json
+2026-07-12 01:12:35,089 | INFO | MamaAI | [059cb51d] 200 (11.88 ms)
+2026-07-12 01:13:13,461 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-12 01:14:33,637 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-12 01:14:44,117 | INFO | MamaAI | [a2127be3] GET /
+2026-07-12 01:14:44,140 | INFO | MamaAI | Home endpoint accessed
+2026-07-12 01:14:44,142 | INFO | MamaAI | [a2127be3] 200 (25.12 ms)
+2026-07-12 01:14:52,323 | INFO | MamaAI | [f1cc9e86] GET /docs
+2026-07-12 01:14:52,325 | INFO | MamaAI | [f1cc9e86] 200 (1.0 ms)
+2026-07-12 01:14:52,561 | INFO | MamaAI | [991144a0] GET /openapi.json
+2026-07-12 01:14:52,570 | INFO | MamaAI | [991144a0] 200 (8.87 ms)
+2026-07-12 01:15:34,280 | INFO | MamaAI | [8a93ea8e] POST /chat
+2026-07-12 01:15:34,329 | INFO | MamaAI | [8a93ea8e] 200 (49.76 ms)
+2026-07-12 01:15:47,039 | INFO | MamaAI | [786f2a44] POST /chat
+2026-07-12 01:15:47,166 | INFO | MamaAI | [786f2a44] 200 (126.51 ms)
+2026-07-12 01:16:02,175 | INFO | MamaAI | [21b1479d] POST /chat
+2026-07-12 01:16:02,382 | INFO | MamaAI | [21b1479d] 200 (207.45 ms)
+2026-07-12 01:21:43,948 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-12 01:21:47,058 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-12 01:21:54,598 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-12 01:22:07,139 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-12 01:22:18,863 | INFO | MamaAI | [cdb26e4d] GET /docs
+2026-07-12 01:22:18,864 | INFO | MamaAI | [cdb26e4d] 200 (1.0 ms)
+2026-07-12 01:22:19,002 | INFO | MamaAI | [78de0379] GET /openapi.json
+2026-07-12 01:22:19,021 | INFO | MamaAI | [78de0379] 200 (18.8 ms)
+2026-07-12 01:22:28,584 | INFO | MamaAI | [19e48efc] POST /chat
+2026-07-12 01:22:30,257 | INFO | MamaAI | [19e48efc] 200 (1672.65 ms)
+2026-07-12 01:22:42,456 | INFO | MamaAI | [febbe376] POST /chat
+2026-07-12 01:22:44,433 | INFO | MamaAI | [febbe376] 200 (1976.18 ms)
+2026-07-12 01:24:02,129 | INFO | MamaAI | [46e9d637] GET /
+2026-07-12 01:24:02,130 | INFO | MamaAI | Home endpoint accessed
+2026-07-12 01:24:02,131 | INFO | MamaAI | [46e9d637] 200 (2.02 ms)
+2026-07-12 01:24:03,567 | INFO | MamaAI | [08a19316] GET /
+2026-07-12 01:24:03,568 | INFO | MamaAI | Home endpoint accessed
+2026-07-12 01:24:03,569 | INFO | MamaAI | [08a19316] 200 (2.1 ms)
+2026-07-12 01:24:03,745 | INFO | MamaAI | [9e9ff6ff] GET /
+2026-07-12 01:24:03,747 | INFO | MamaAI | Home endpoint accessed
+2026-07-12 01:24:03,748 | INFO | MamaAI | [9e9ff6ff] 200 (3.52 ms)
+2026-07-12 01:24:29,512 | INFO | MamaAI | [35b51c13] GET /docs
+2026-07-12 01:24:29,514 | INFO | MamaAI | [35b51c13] 200 (1.56 ms)
+2026-07-12 01:24:29,661 | INFO | MamaAI | [6205ea68] GET /openapi.json
+2026-07-12 01:24:29,662 | INFO | MamaAI | [6205ea68] 200 (1.0 ms)
+2026-07-12 01:25:03,579 | INFO | MamaAI | [cb3e6c08] POST /chat
+2026-07-12 01:25:06,988 | INFO | MamaAI | [cb3e6c08] 200 (3409.01 ms)
+2026-07-12 01:25:09,201 | INFO | MamaAI | [106f2a2e] POST /chat
+2026-07-12 01:25:12,394 | INFO | MamaAI | [106f2a2e] 200 (3192.22 ms)
+2026-07-12 01:25:27,768 | INFO | MamaAI | [1df22130] POST /chat
+2026-07-12 01:25:27,803 | INFO | MamaAI | [1df22130] 200 (35.31 ms)
+2026-07-12 01:26:47,795 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-12 01:26:50,784 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-12 01:27:02,117 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-12 01:27:04,984 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-12 01:27:09,358 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-12 01:27:14,611 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-12 01:27:50,996 | INFO | MamaAI | [e970feac] POST /chat
+2026-07-12 01:27:51,037 | INFO | MamaAI | [e970feac] 200 (41.37 ms)
+2026-07-12 01:28:16,842 | INFO | MamaAI | [d8e70391] POST /chat
+2026-07-12 01:28:16,864 | INFO | MamaAI | [d8e70391] 200 (22.42 ms)
+2026-07-12 01:28:46,940 | INFO | MamaAI | [067178b3] POST /chat
+2026-07-12 01:28:46,967 | INFO | MamaAI | [067178b3] 200 (27.2 ms)
+2026-07-12 01:30:10,984 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-12 01:31:18,193 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-12 01:31:34,029 | INFO | MamaAI | [21420cc3] POST /chat
+2026-07-12 01:31:34,188 | INFO | MamaAI | [21420cc3] 200 (158.67 ms)
+2026-07-12 01:32:28,737 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-12 01:55:44,323 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-12 01:55:55,777 | INFO | MamaAI | [407f9d73] GET /docs
+2026-07-12 01:55:55,778 | INFO | MamaAI | [407f9d73] 200 (1.06 ms)
+2026-07-12 01:55:56,024 | INFO | MamaAI | [059a4d27] GET /openapi.json
+2026-07-12 01:55:56,065 | INFO | MamaAI | [059a4d27] 200 (42.95 ms)
+2026-07-12 01:56:06,507 | INFO | MamaAI | [2c4d664e] POST /chat
+2026-07-12 01:56:06,609 | INFO | MamaAI | [2c4d664e] 200 (101.44 ms)
+2026-07-12 01:56:47,475 | INFO | MamaAI | [31de753f] POST /chat
+2026-07-12 01:56:47,540 | INFO | MamaAI | [31de753f] 200 (64.84 ms)
+2026-07-12 02:02:03,083 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-12 02:02:10,727 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-12 02:02:25,810 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-12 02:02:31,087 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-12 02:02:31,194 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-12 02:21:59,230 | INFO | MamaAI | ========== Mama AI Backend Started ==========
+2026-07-12 02:22:10,516 | INFO | MamaAI | [3c099f2a] GET /docs
+2026-07-12 02:22:10,518 | INFO | MamaAI | [3c099f2a] 200 (2.04 ms)
+2026-07-12 02:22:10,773 | INFO | MamaAI | [196dcf31] GET /openapi.json
+2026-07-12 02:22:10,816 | INFO | MamaAI | [196dcf31] 200 (42.43 ms)
+2026-07-12 02:22:44,899 | INFO | MamaAI | ========== Mama AI Backend Stopped ==========
+2026-07-21 09:50:48 | INFO | mama_ai | Mama AI logger test
+2026-07-21 09:51:32 | INFO | mama_ai | ========== Mama AI Backend Started ==========
+2026-07-21 09:51:36 | INFO | mama_ai | ========== Mama AI Backend Stopped ==========
+2026-07-21 09:51:46 | INFO | mama_ai | ========== Mama AI Backend Started ==========
+2026-07-21 09:51:53 | INFO | mama_ai | [9510e814] GET /docs
+2026-07-21 09:51:53 | INFO | mama_ai | [9510e814] 200 (1.38 ms)
+2026-07-21 09:51:53 | INFO | mama_ai | [53f40b75] GET /openapi.json
+2026-07-21 09:51:53 | INFO | mama_ai | [53f40b75] 200 (9.27 ms)
+2026-07-21 09:52:09 | INFO | mama_ai | ========== Mama AI Backend Stopped ==========
+2026-07-21 10:19:13 | INFO | mama_ai | ========== Mama AI Backend Started ==========
+2026-07-21 10:19:32 | INFO | mama_ai | [e41e000c] GET /
+2026-07-21 10:19:32 | INFO | mama_ai | Home endpoint accessed
+2026-07-21 10:19:32 | INFO | mama_ai | [e41e000c] 200 (36.3 ms)
+2026-07-21 10:19:33 | INFO | mama_ai | [e707028b] GET /favicon.ico
+2026-07-21 10:19:33 | INFO | mama_ai | [e707028b] 404 (2.63 ms)
+2026-07-21 10:19:49 | INFO | mama_ai | ========== Mama AI Backend Stopped ==========
+2026-07-21 10:28:05 | INFO | mama_ai | ========== Mama AI Backend Started ==========
+2026-07-21 10:28:17 | INFO | mama_ai | [ee39fa69] GET /
+2026-07-21 10:28:17 | INFO | mama_ai | Home endpoint accessed
+2026-07-21 10:28:17 | INFO | mama_ai | [ee39fa69] 200 (44.16 ms)
+2026-07-21 10:28:36 | INFO | mama_ai | ========== Mama AI Backend Stopped ==========

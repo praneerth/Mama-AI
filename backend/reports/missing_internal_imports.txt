@@ -1,0 +1,13 @@
+app.controller.desktop_controller -> app.planner.recovery
+app.planner.verifier -> app.vision.text_reader
+app.tools.tool_manager -> app.tools.automation
+app.tools.tool_manager -> app.tools.cursor
+app.tools.tool_manager -> app.tools.files
+app.tools.tool_manager -> app.tools.system
+app.tools.tool_manager -> app.tools.ui_click
+app.tools.tool_manager -> app.tools.ui_elements
+app.tools.tool_manager -> app.tools.vision
+app.tools.tool_manager -> app.tools.window_control
+app.ui.ocr_click -> app.vision.capture
+app.verifier.ocr_verifier -> app.vision.text_reader
+app.verifier.vision_verifier -> app.vision.vision_ai

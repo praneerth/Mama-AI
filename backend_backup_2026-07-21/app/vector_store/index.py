@@ -1,0 +1,2 @@
+class VectorIndex:
+    pass

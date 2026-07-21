@@ -1,0 +1,105 @@
+authentication.py
+    app.browser.authentication
+    app.security.authentication
+confidence_engine.py
+    app.cognition.confidence_engine
+    app.reasoning.confidence_engine
+coordinator.py
+    app.multi_agent.coordinator
+    app.orchestration.coordinator
+decision.py
+    app.agent.decision
+    app.verifier.decision
+dispatcher.py
+    app.agent.dispatcher
+    app.multi_agent.dispatcher
+exceptions.py
+    app.core.exceptions
+    app.exceptions
+executor.py
+    app.cognition.executor
+    app.execution.executor
+    app.planner.executor
+    app.workflows.executor
+gemini.py
+    app.ai.providers.gemini
+    app.llm.gemini
+goal_manager.py
+    app.agent.goal_manager
+    app.planner.goal_manager
+health.py
+    app.api.health
+    app.monitoring.health
+learner.py
+    app.agent.learner
+    app.cognition.learner
+    app.learning.learner
+long_term_memory.py
+    app.cognition.long_term_memory
+    app.memory.long_term_memory
+main.py
+    app.main
+    main
+main_window.py
+    app.gui.main_window
+    app.ui.main_window
+manager.py
+    app.plugins.manager
+    app.tools.manager
+memory_manager.py
+    app.agent.memory_manager
+    app.memory.memory_manager
+permissions.py
+    app.agent.permissions
+    app.security.permissions
+pipeline.py
+    app.cognition.pipeline
+    app.execution.pipeline
+    app.orchestration.pipeline
+planner.py
+    app.cognition.planner
+    app.planner.planner
+reasoning_engine.py
+    app.cognition.reasoning_engine
+    app.reasoning.reasoning_engine
+registry.py
+    app.plugins.registry
+    app.skills.registry
+replanner.py
+    app.agent.replanner
+    app.reasoning.replanner
+router.py
+    app.commands.router
+    app.orchestration.router
+scheduler.py
+    app.agent.scheduler
+    app.automation.scheduler
+self_reflection.py
+    app.cognition.self_reflection
+    app.reasoning.self_reflection
+settings.py
+    app.config.settings
+    app.gui.settings
+smart_click.py
+    app.browser.smart_click
+    app.desktop.smart_click
+smart_scroll.py
+    app.browser.smart_scroll
+    app.desktop.smart_scroll
+state_manager.py
+    app.agent.state_manager
+    app.controller.state_manager
+task_queue.py
+    app.controller.task_queue
+    app.multi_agent.task_queue
+    app.planner.task_queue
+ui_detector.py
+    app.desktop.ui_detector
+    app.ui.ui_detector
+    app.vision.ui_detector
+verifier.py
+    app.cognition.verifier
+    app.planner.verifier
+working_memory.py
+    app.cognition.working_memory
+    app.memory.working_memory

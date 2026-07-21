@@ -1,0 +1,1 @@
+def run_benchmark(): return {}
