@@ -79,18 +79,6 @@ app.config
 app.config.logger
     -> app.config
     -> app.config.settings
-app.controller.action_executor
-    -> app.tools.manager
-app.controller.desktop_controller
-    -> app.controller.action_executor
-    -> app.controller.memory_bridge
-    -> app.controller.planner_bridge
-    -> app.controller.state_manager
-    -> app.controller.task_queue
-    -> app.planner.recovery
-    -> app.planner.verifier
-app.controller.planner_bridge
-    -> app.planner.planner
 app.core.mama
     -> app.commands.router
 app.core.shutdown

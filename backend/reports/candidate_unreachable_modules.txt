@@ -103,13 +103,6 @@ app.commands.system_commands
 app.config.constants
 app.config.logging
 app.config.paths
-app.controller
-app.controller.action_executor
-app.controller.desktop_controller
-app.controller.memory_bridge
-app.controller.planner_bridge
-app.controller.state_manager
-app.controller.task_queue
 app.core
 app.core.dependency
 app.core.exceptions
@@ -276,10 +269,6 @@ app.skills
 app.skills.installer
 app.skills.registry
 app.skills.updater
-app.testing
-app.testing.benchmark
-app.testing.regression
-app.testing.stress_test
 app.tools
 app.tools.api_tool
 app.tools.audio_tool

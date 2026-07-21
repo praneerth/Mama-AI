@@ -86,11 +86,7 @@ smart_click.py
 smart_scroll.py
     app.browser.smart_scroll
     app.desktop.smart_scroll
-state_manager.py
-    app.agent.state_manager
-    app.controller.state_manager
 task_queue.py
-    app.controller.task_queue
     app.multi_agent.task_queue
     app.planner.task_queue
 ui_detector.py

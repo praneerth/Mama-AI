@@ -1,4 +1,3 @@
-app.controller.desktop_controller -> app.planner.recovery
 app.planner.verifier -> app.vision.text_reader
 app.tools.tool_manager -> app.tools.automation
 app.tools.tool_manager -> app.tools.cursor
