@@ -155,6 +155,28 @@ class TestMamaEngine(unittest.TestCase):
         )
         self.assertEqual(engine.registry.count(), 1)
 
+    def test_pre_registered_pending_task_can_execute(self):
+        request = TaskRequest(command="open calculator")
+
+        registry = TaskRegistry()
+        registry.register(request)
+
+        engine = MamaEngine(
+            executor=lambda command: "Calculator opened.",
+            bus=EventBus(),
+            registry=registry,
+        )
+
+        result = engine.execute(request)
+        record = registry.get(request.task_id)
+
+        self.assertTrue(result.success)
+        self.assertIsNotNone(record)
+        self.assertEqual(
+            record.status,
+            TaskStatus.SUCCEEDED,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

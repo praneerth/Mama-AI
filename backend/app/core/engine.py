@@ -12,7 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.core.event_bus import EventBus, event_bus
-from app.core.task import TaskRequest, TaskResult
+from app.core.task import TaskRequest, TaskResult, TaskStatus
 from app.core.task_registry import TaskRegistry, task_registry
 
 
@@ -133,7 +133,15 @@ class MamaEngine:
         request: TaskRequest,
     ) -> str | None:
         try:
-            self._task_registry.register(request)
+            existing_record = self._task_registry.get(request.task_id)
+
+            if existing_record is None:
+                self._task_registry.register(request)
+
+            elif existing_record.status != TaskStatus.PENDING:
+                raise ValueError(
+                    f"Task is already registered: {request.task_id}"
+                )
 
             running_record = self._task_registry.mark_running(
                 request.task_id
