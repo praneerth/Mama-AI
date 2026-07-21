@@ -1,5 +1,6 @@
 """
-Runtime persistence and durable-worker lifecycle for Mama AI.
+Runtime persistence, queue reconciliation, and worker lifecycle
+for Mama AI.
 """
 
 from __future__ import annotations
@@ -10,6 +11,10 @@ from typing import Any, Protocol
 from app.core.approval_registry import (
     ApprovalRegistry,
     approval_registry,
+)
+from app.core.queue_reconciler import (
+    QueueReconciler,
+    queue_reconciler,
 )
 from app.core.task_registry import (
     TaskRegistry,
@@ -43,9 +48,23 @@ class RuntimeWorker(Protocol):
         ...
 
 
+class RuntimeReconciler(Protocol):
+    """Queue-reconciliation interface required at startup."""
+
+    def reconcile(self) -> Any:
+        ...
+
+
 class RuntimeStateManager:
     """
-    Coordinate persistent registries and the durable task worker.
+    Coordinate persistent registries, queue reconciliation, and worker.
+
+    Startup order:
+
+    1. Restore persistent tasks
+    2. Restore persistent approvals
+    3. Reconcile task and queue state
+    4. Start the durable worker
 
     Startup and shutdown operations are idempotent.
     """
@@ -56,18 +75,34 @@ class RuntimeStateManager:
         approvals: ApprovalRegistry,
         store: SQLiteStateStore,
         worker: RuntimeWorker | None = None,
+        reconciler: RuntimeReconciler | None = None,
     ) -> None:
         self._tasks = tasks
         self._approvals = approvals
         self._store = store
         self._worker = worker
+        self._reconciler = reconciler
+
         self._lock = RLock()
         self._started = False
+        self._last_reconciliation: dict[str, Any] | None = None
 
     @property
     def started(self) -> bool:
         with self._lock:
             return self._started
+
+    @property
+    def last_reconciliation(
+        self,
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            if self._last_reconciliation is None:
+                return None
+
+            return dict(
+                self._last_reconciliation
+            )
 
     def start(
         self,
@@ -75,7 +110,7 @@ class RuntimeStateManager:
         recover_interrupted: bool = True,
     ) -> dict[str, Any]:
         """
-        Restore persistent state and start the durable worker.
+        Restore persistent state, reconcile the queue, and start worker.
 
         Running tasks interrupted by a restart are marked failed.
         Pending tasks remain available for durable queue execution.
@@ -90,23 +125,36 @@ class RuntimeStateManager:
                     "restored_approvals": len(
                         self._approvals.list()
                     ),
+                    "reconciliation": (
+                        dict(
+                            self._last_reconciliation
+                        )
+                        if self._last_reconciliation
+                        is not None
+                        else None
+                    ),
                     "worker_started": False,
                     "worker_running": (
                         self._worker.running
                         if self._worker is not None
                         else False
                     ),
-                    "database_path": self._store.database_path,
+                    "database_path": (
+                        self._store.database_path
+                    ),
                 }
 
             worker_started = False
+            reconciliation_summary = None
 
             try:
                 restored_tasks = (
                     self._tasks.enable_persistence(
                         self._store,
                         restore=True,
-                        recover_interrupted=recover_interrupted,
+                        recover_interrupted=(
+                            recover_interrupted
+                        ),
                     )
                 )
 
@@ -117,19 +165,40 @@ class RuntimeStateManager:
                     )
                 )
 
+                if self._reconciler is not None:
+                    report = (
+                        self._reconciler.reconcile()
+                    )
+
+                    reconciliation_summary = (
+                        self._normalize_report(
+                            report
+                        )
+                    )
+
                 if self._worker is not None:
-                    worker_started = self._worker.start()
+                    worker_started = (
+                        self._worker.start()
+                    )
 
             except Exception:
                 if (
                     self._worker is not None
                     and self._worker.running
                 ):
-                    self._worker.stop(timeout=5)
+                    self._worker.stop(
+                        timeout=5
+                    )
 
                 self._approvals.disable_persistence()
                 self._tasks.disable_persistence()
+                self._last_reconciliation = None
+
                 raise
+
+            self._last_reconciliation = (
+                reconciliation_summary
+            )
 
             self._started = True
 
@@ -137,25 +206,38 @@ class RuntimeStateManager:
                 "started": True,
                 "already_started": False,
                 "restored_tasks": restored_tasks,
-                "restored_approvals": restored_approvals,
+                "restored_approvals": (
+                    restored_approvals
+                ),
+                "reconciliation": (
+                    dict(
+                        reconciliation_summary
+                    )
+                    if reconciliation_summary
+                    is not None
+                    else None
+                ),
                 "worker_started": worker_started,
                 "worker_running": (
                     self._worker.running
                     if self._worker is not None
                     else False
                 ),
-                "database_path": self._store.database_path,
+                "database_path": (
+                    self._store.database_path
+                ),
             }
 
     def stop(self) -> dict[str, Any]:
         """
-        Stop the durable worker and disable persistence.
+        Stop the worker and disable persistence.
 
         Existing SQLite records remain stored.
         """
 
         with self._lock:
             task_count = self._tasks.count()
+
             approval_count = len(
                 self._approvals.list()
             )
@@ -166,14 +248,18 @@ class RuntimeStateManager:
                     "already_stopped": True,
                     "worker_stopped": True,
                     "tasks_in_memory": task_count,
-                    "approvals_in_memory": approval_count,
+                    "approvals_in_memory": (
+                        approval_count
+                    ),
                 }
 
             worker_stopped = True
 
             if self._worker is not None:
-                worker_stopped = self._worker.stop(
-                    timeout=30
+                worker_stopped = (
+                    self._worker.stop(
+                        timeout=30
+                    )
                 )
 
             self._approvals.disable_persistence()
@@ -185,8 +271,46 @@ class RuntimeStateManager:
                 "already_stopped": False,
                 "worker_stopped": worker_stopped,
                 "tasks_in_memory": task_count,
-                "approvals_in_memory": approval_count,
+                "approvals_in_memory": (
+                    approval_count
+                ),
             }
+
+    @staticmethod
+    def _normalize_report(
+        report: Any,
+    ) -> dict[str, Any]:
+        """
+        Convert a reconciliation report into a serializable dictionary.
+        """
+
+        if report is None:
+            return {}
+
+        if isinstance(report, dict):
+            return dict(report)
+
+        to_dict = getattr(
+            report,
+            "to_dict",
+            None,
+        )
+
+        if callable(to_dict):
+            result = to_dict()
+
+            if not isinstance(result, dict):
+                raise TypeError(
+                    "Reconciliation to_dict() must "
+                    "return a dictionary."
+                )
+
+            return dict(result)
+
+        raise TypeError(
+            "Reconciliation must return a dictionary "
+            "or an object with to_dict()."
+        )
 
 
 runtime_state = RuntimeStateManager(
@@ -194,6 +318,7 @@ runtime_state = RuntimeStateManager(
     approvals=approval_registry,
     store=state_store,
     worker=task_worker,
+    reconciler=queue_reconciler,
 )
 
 
@@ -201,7 +326,7 @@ def initialize_runtime_state(
     *,
     recover_interrupted: bool = True,
 ) -> dict[str, Any]:
-    """Restore state and start runtime services."""
+    """Restore and reconcile state, then start runtime services."""
 
     return runtime_state.start(
         recover_interrupted=recover_interrupted
@@ -215,6 +340,7 @@ def shutdown_runtime_state() -> dict[str, Any]:
 
 
 __all__ = [
+    "RuntimeReconciler",
     "RuntimeStateManager",
     "RuntimeWorker",
     "initialize_runtime_state",
