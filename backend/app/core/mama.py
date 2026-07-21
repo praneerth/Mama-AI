@@ -1,9 +1,5 @@
 """
-Compatibility bridge for the single Mama AI production engine.
-
-Existing API, GUI, voice and legacy modules can continue importing:
-
-    from app.core.mama import run
+Compatibility bridge for the secure Mama AI production engine.
 """
 
 from __future__ import annotations
@@ -11,35 +7,53 @@ from __future__ import annotations
 from typing import Any
 
 from app.core.engine import engine
+from app.core.task import TaskRequest
 
 
 def run(
-    task: str,
+    task: TaskRequest | str,
     *,
     source: str = "text",
     autonomy_level: int = 1,
+    owner_id: str | None = None,
+    approval_id: str | None = None,
+    approval_token: str | None = None,
 ) -> dict[str, Any]:
-    """
-    Execute one task through the canonical production engine.
+    execution_options: dict[str, Any] = {
+        "source": source,
+        "autonomy_level": autonomy_level,
+    }
 
-    The returned dictionary keeps the old response fields while also
-    including the new production task result fields.
-    """
+    if owner_id is not None:
+        execution_options["owner_id"] = owner_id
+
+    if approval_id is not None:
+        execution_options["approval_id"] = approval_id
+
+    if approval_token is not None:
+        execution_options["approval_token"] = approval_token
 
     result = engine.execute(
         task,
-        source=source,
-        autonomy_level=autonomy_level,
+        **execution_options,
     )
 
-    data = result.to_dict()
+    if isinstance(task, TaskRequest):
+        command = task.command
+    elif isinstance(task, str):
+        command = task.strip()
+    else:
+        command = ""
 
-    # Preserve compatibility with the previous Mama AI response format.
-    data["status"] = "success" if result.success else "failed"
+    data = result.to_dict()
+    data["status"] = (
+        "success"
+        if result.success
+        else result.status.value
+    )
     data["response"] = result.message
     data["result"] = result.output
-    data["error"] = result.error
-    data["task"] = task.strip() if isinstance(task, str) else ""
+    data["task"] = command
 
     return data
 

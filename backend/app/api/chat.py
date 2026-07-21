@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 from app.core.engine import engine
 from app.core.mama import run
+from app.core.risk_policy import risk_policy
 from app.core.task import TaskRequest, TaskStatus
 from app.services.ai_pipeline import process_request
 
@@ -47,10 +48,16 @@ def chat(
     )
 
     if intent in AUTOMATION_INTENTS:
+        assessment = risk_policy.assess(user_message)
+
         task_request = TaskRequest(
             command=user_message,
             source="api",
             autonomy_level=2,
+            risk_level=assessment.risk_level,
+            metadata={
+                "owner_id": "local-user",
+            },
         )
 
         engine.registry.register(task_request)
@@ -64,11 +71,12 @@ def chat(
             "success": True,
             "response": (
                 "Mama AI accepted the automation task and "
-                "started background execution."
+                "started background processing."
             ),
             "intent": intent,
             "task_id": task_request.task_id,
             "task_status": TaskStatus.PENDING.value,
+            "risk_level": assessment.risk_level.value,
         }
 
     return {
@@ -77,4 +85,5 @@ def chat(
         "intent": intent,
         "task_id": None,
         "task_status": "completed",
+        "risk_level": "low",
     }
