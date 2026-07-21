@@ -36,3 +36,9 @@ backend/logs/*.log
 
 # Local recovery copies
 backend/reports/mama_before_engine.py
+
+# Mama AI runtime SQLite database
+backend/app/database/mama_ai.db
+backend/app/database/mama_ai.db-wal
+backend/app/database/mama_ai.db-shm
+backend/app/database/mama_ai.db-journal
