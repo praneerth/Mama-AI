@@ -7,6 +7,8 @@ Approval tokens are:
 - Bound to one task and one owner
 - Time limited
 - Valid for one use only
+
+Persistence is optional and disabled by default.
 """
 
 from __future__ import annotations
@@ -19,10 +21,26 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from threading import RLock
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 from app.core.task import RiskLevel
+
+
+class ApprovalStateStore(Protocol):
+    """Storage interface required by ApprovalRegistry."""
+
+    def save_approval(self, record: Any) -> None:
+        ...
+
+    def list_approvals(
+        self,
+        *,
+        status: str | None = None,
+        owner_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        ...
 
 
 class ApprovalStatus(str, Enum):
@@ -35,6 +53,32 @@ class ApprovalStatus(str, Enum):
 
 def utc_datetime() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _parse_datetime(
+    value: datetime | str,
+    field_name: str,
+) -> datetime:
+    if isinstance(value, datetime):
+        parsed = value
+
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError(
+                f"{field_name} must be a valid ISO datetime."
+            ) from exc
+
+    else:
+        raise TypeError(
+            f"{field_name} must be a datetime or ISO text."
+        )
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+
+    return parsed.astimezone(timezone.utc)
 
 
 @dataclass(slots=True)
@@ -54,6 +98,61 @@ class ApprovalRecord:
         default=None,
         repr=False,
     )
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+    ) -> "ApprovalRecord":
+        if not isinstance(data, dict):
+            raise TypeError(
+                "Persisted approval data must be a dictionary."
+            )
+
+        decided_at = data.get("decided_at")
+        consumed_at = data.get("consumed_at")
+
+        return cls(
+            approval_id=str(data["approval_id"]),
+            task_id=str(data["task_id"]),
+            owner_id=str(data["owner_id"]),
+            command=str(data["command"]),
+            risk_level=RiskLevel(data["risk_level"]),
+            reasons=[
+                str(reason)
+                for reason in (data.get("reasons") or [])
+            ],
+            status=ApprovalStatus(data["status"]),
+            created_at=_parse_datetime(
+                data["created_at"],
+                "Created at",
+            ),
+            expires_at=_parse_datetime(
+                data["expires_at"],
+                "Expires at",
+            ),
+            decided_at=(
+                _parse_datetime(
+                    decided_at,
+                    "Decided at",
+                )
+                if decided_at is not None
+                else None
+            ),
+            consumed_at=(
+                _parse_datetime(
+                    consumed_at,
+                    "Consumed at",
+                )
+                if consumed_at is not None
+                else None
+            ),
+            token_hash=(
+                str(data["token_hash"])
+                if data.get("token_hash") is not None
+                else None
+            ),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -98,7 +197,12 @@ class ApprovalGrant:
 
 
 class ApprovalRegistry:
-    """Thread-safe approval request and token registry."""
+    """
+    Thread-safe approval request and token registry.
+
+    Persistence must be explicitly enabled so imports and unit tests
+    do not write to the production database.
+    """
 
     def __init__(
         self,
@@ -107,6 +211,89 @@ class ApprovalRegistry:
         self._records: dict[str, ApprovalRecord] = {}
         self._lock = RLock()
         self._clock = clock or utc_datetime
+        self._store: ApprovalStateStore | None = None
+        self._persistence_enabled = False
+
+    @property
+    def persistence_enabled(self) -> bool:
+        return self._persistence_enabled
+
+    def enable_persistence(
+        self,
+        store: ApprovalStateStore,
+        *,
+        restore: bool = True,
+    ) -> int:
+        """
+        Attach persistent approval storage.
+
+        Returns the number of approval records restored.
+        """
+
+        if store is None:
+            raise TypeError(
+                "An approval persistence store is required."
+            )
+
+        if not callable(
+            getattr(store, "save_approval", None)
+        ):
+            raise TypeError(
+                "Approval store must provide save_approval()."
+            )
+
+        if not callable(
+            getattr(store, "list_approvals", None)
+        ):
+            raise TypeError(
+                "Approval store must provide list_approvals()."
+            )
+
+        with self._lock:
+            self._store = store
+            self._persistence_enabled = True
+
+        if restore:
+            return self.restore()
+
+        return 0
+
+    def disable_persistence(self) -> None:
+        """
+        Stop future writes without clearing memory or database rows.
+        """
+
+        with self._lock:
+            self._persistence_enabled = False
+            self._store = None
+
+    def restore(self) -> int:
+        """
+        Restore approval records from persistent storage.
+
+        Pending and approved records that passed their expiration time
+        are restored as expired.
+        """
+
+        store = self._require_store()
+        rows = store.list_approvals(limit=1000)
+
+        restored: dict[str, ApprovalRecord] = {}
+
+        for data in rows:
+            record = ApprovalRecord.from_dict(data)
+
+            changed = self._refresh_expiry_locked(record)
+
+            if changed:
+                store.save_approval(record)
+
+            restored[record.approval_id] = record
+
+        with self._lock:
+            self._records = restored
+
+        return len(restored)
 
     def create(
         self,
@@ -123,11 +310,14 @@ class ApprovalRegistry:
         command = self._validate_text(command, "Command")
 
         if not isinstance(ttl_seconds, int):
-            raise TypeError("Approval lifetime must be an integer.")
+            raise TypeError(
+                "Approval lifetime must be an integer."
+            )
 
         if ttl_seconds < 1 or ttl_seconds > 1800:
             raise ValueError(
-                "Approval lifetime must be between 1 and 1800 seconds."
+                "Approval lifetime must be between 1 and "
+                "1800 seconds."
             )
 
         risk_level = RiskLevel(risk_level)
@@ -146,11 +336,22 @@ class ApprovalRegistry:
             ],
             status=ApprovalStatus.PENDING,
             created_at=now,
-            expires_at=now + timedelta(seconds=ttl_seconds),
+            expires_at=(
+                now + timedelta(seconds=ttl_seconds)
+            ),
         )
 
         with self._lock:
             self._records[record.approval_id] = record
+
+            try:
+                self._persist_locked(record)
+            except Exception:
+                self._records.pop(
+                    record.approval_id,
+                    None,
+                )
+                raise
 
         return deepcopy(record)
 
@@ -164,28 +365,41 @@ class ApprovalRegistry:
             approval_id,
             "Approval ID",
         )
-        owner_id = self._validate_text(owner_id, "Owner ID")
+        owner_id = self._validate_text(
+            owner_id,
+            "Owner ID",
+        )
 
         with self._lock:
             record = self._require_locked(approval_id)
-            self._refresh_expiry_locked(record)
 
+            self._refresh_and_persist_locked(record)
             self._verify_owner(record, owner_id)
 
             if record.status == ApprovalStatus.EXPIRED:
-                raise TimeoutError("The approval request has expired.")
+                raise TimeoutError(
+                    "The approval request has expired."
+                )
 
             if record.status != ApprovalStatus.PENDING:
                 raise ValueError(
-                    f"Approval cannot be granted from status "
+                    "Approval cannot be granted from status "
                     f"{record.status.value}."
                 )
 
+            previous = deepcopy(record)
             token = secrets.token_urlsafe(32)
 
-            record.token_hash = self._hash_token(token)
-            record.status = ApprovalStatus.APPROVED
-            record.decided_at = self._now()
+            try:
+                record.token_hash = self._hash_token(token)
+                record.status = ApprovalStatus.APPROVED
+                record.decided_at = self._now()
+
+                self._persist_locked(record)
+
+            except Exception:
+                self._records[approval_id] = previous
+                raise
 
             return ApprovalGrant(
                 approval_id=record.approval_id,
@@ -205,26 +419,40 @@ class ApprovalRegistry:
             approval_id,
             "Approval ID",
         )
-        owner_id = self._validate_text(owner_id, "Owner ID")
+        owner_id = self._validate_text(
+            owner_id,
+            "Owner ID",
+        )
 
         with self._lock:
             record = self._require_locked(approval_id)
-            self._refresh_expiry_locked(record)
 
+            self._refresh_and_persist_locked(record)
             self._verify_owner(record, owner_id)
 
             if record.status == ApprovalStatus.EXPIRED:
-                raise TimeoutError("The approval request has expired.")
+                raise TimeoutError(
+                    "The approval request has expired."
+                )
 
             if record.status != ApprovalStatus.PENDING:
                 raise ValueError(
-                    f"Approval cannot be rejected from status "
+                    "Approval cannot be rejected from status "
                     f"{record.status.value}."
                 )
 
-            record.status = ApprovalStatus.REJECTED
-            record.decided_at = self._now()
-            record.token_hash = None
+            previous = deepcopy(record)
+
+            try:
+                record.status = ApprovalStatus.REJECTED
+                record.decided_at = self._now()
+                record.token_hash = None
+
+                self._persist_locked(record)
+
+            except Exception:
+                self._records[approval_id] = previous
+                raise
 
             return deepcopy(record)
 
@@ -240,23 +468,35 @@ class ApprovalRegistry:
             approval_id,
             "Approval ID",
         )
-        task_id = self._validate_text(task_id, "Task ID")
-        owner_id = self._validate_text(owner_id, "Owner ID")
-        token = self._validate_text(token, "Approval token")
+        task_id = self._validate_text(
+            task_id,
+            "Task ID",
+        )
+        owner_id = self._validate_text(
+            owner_id,
+            "Owner ID",
+        )
+        token = self._validate_text(
+            token,
+            "Approval token",
+        )
 
         with self._lock:
             record = self._require_locked(approval_id)
-            self._refresh_expiry_locked(record)
 
+            self._refresh_and_persist_locked(record)
             self._verify_owner(record, owner_id)
 
             if record.task_id != task_id:
                 raise PermissionError(
-                    "The approval token does not belong to this task."
+                    "The approval token does not belong "
+                    "to this task."
                 )
 
             if record.status == ApprovalStatus.EXPIRED:
-                raise TimeoutError("The approval token has expired.")
+                raise TimeoutError(
+                    "The approval token has expired."
+                )
 
             if record.status == ApprovalStatus.CONSUMED:
                 raise PermissionError(
@@ -275,11 +515,22 @@ class ApprovalRegistry:
                 supplied_hash,
                 stored_hash,
             ):
-                raise PermissionError("Invalid approval token.")
+                raise PermissionError(
+                    "Invalid approval token."
+                )
 
-            record.status = ApprovalStatus.CONSUMED
-            record.consumed_at = self._now()
-            record.token_hash = None
+            previous = deepcopy(record)
+
+            try:
+                record.status = ApprovalStatus.CONSUMED
+                record.consumed_at = self._now()
+                record.token_hash = None
+
+                self._persist_locked(record)
+
+            except Exception:
+                self._records[approval_id] = previous
+                raise
 
             return deepcopy(record)
 
@@ -298,7 +549,8 @@ class ApprovalRegistry:
             if record is None:
                 return None
 
-            self._refresh_expiry_locked(record)
+            self._refresh_and_persist_locked(record)
+
             return deepcopy(record)
 
     def require(
@@ -309,7 +561,8 @@ class ApprovalRegistry:
 
         if record is None:
             raise KeyError(
-                f"Approval request was not found: {approval_id}"
+                "Approval request was not found: "
+                f"{approval_id}"
             )
 
         return record
@@ -327,11 +580,14 @@ class ApprovalRegistry:
         )
 
         if owner_id is not None:
-            owner_id = self._validate_text(owner_id, "Owner ID")
+            owner_id = self._validate_text(
+                owner_id,
+                "Owner ID",
+            )
 
         with self._lock:
             for record in self._records.values():
-                self._refresh_expiry_locked(record)
+                self._refresh_and_persist_locked(record)
 
             records = list(self._records.values())
 
@@ -357,26 +613,35 @@ class ApprovalRegistry:
             return deepcopy(records)
 
     def clear(self) -> None:
+        """
+        Clear in-memory approval records only.
+
+        Persistent database rows are intentionally preserved.
+        """
+
         with self._lock:
             self._records.clear()
 
-    def _require_locked(
+    def _refresh_and_persist_locked(
         self,
-        approval_id: str,
-    ) -> ApprovalRecord:
-        record = self._records.get(approval_id)
+        record: ApprovalRecord,
+    ) -> None:
+        previous = deepcopy(record)
 
-        if record is None:
-            raise KeyError(
-                f"Approval request was not found: {approval_id}"
-            )
+        try:
+            changed = self._refresh_expiry_locked(record)
 
-        return record
+            if changed:
+                self._persist_locked(record)
+
+        except Exception:
+            self._records[record.approval_id] = previous
+            raise
 
     def _refresh_expiry_locked(
         self,
         record: ApprovalRecord,
-    ) -> None:
+    ) -> bool:
         if (
             record.status
             in {
@@ -387,6 +652,45 @@ class ApprovalRegistry:
         ):
             record.status = ApprovalStatus.EXPIRED
             record.token_hash = None
+            return True
+
+        return False
+
+    def _persist_locked(
+        self,
+        record: ApprovalRecord,
+    ) -> None:
+        if not self._persistence_enabled:
+            return
+
+        store = self._require_store()
+        store.save_approval(record)
+
+    def _require_store(self) -> ApprovalStateStore:
+        with self._lock:
+            if (
+                not self._persistence_enabled
+                or self._store is None
+            ):
+                raise RuntimeError(
+                    "Approval persistence has not been enabled."
+                )
+
+            return self._store
+
+    def _require_locked(
+        self,
+        approval_id: str,
+    ) -> ApprovalRecord:
+        record = self._records.get(approval_id)
+
+        if record is None:
+            raise KeyError(
+                "Approval request was not found: "
+                f"{approval_id}"
+            )
+
+        return record
 
     @staticmethod
     def _verify_owner(
@@ -395,7 +699,8 @@ class ApprovalRegistry:
     ) -> None:
         if record.owner_id != owner_id:
             raise PermissionError(
-                "This approval request belongs to another owner."
+                "This approval request belongs to "
+                "another owner."
             )
 
     @staticmethod
@@ -413,7 +718,9 @@ class ApprovalRegistry:
             )
 
         if current.tzinfo is None:
-            current = current.replace(tzinfo=timezone.utc)
+            current = current.replace(
+                tzinfo=timezone.utc
+            )
 
         return current.astimezone(timezone.utc)
 
@@ -423,12 +730,16 @@ class ApprovalRegistry:
         field_name: str,
     ) -> str:
         if not isinstance(value, str):
-            raise TypeError(f"{field_name} must be text.")
+            raise TypeError(
+                f"{field_name} must be text."
+            )
 
         value = value.strip()
 
         if not value:
-            raise ValueError(f"{field_name} cannot be empty.")
+            raise ValueError(
+                f"{field_name} cannot be empty."
+            )
 
         return value
 
@@ -440,6 +751,7 @@ __all__ = [
     "ApprovalGrant",
     "ApprovalRecord",
     "ApprovalRegistry",
+    "ApprovalStateStore",
     "ApprovalStatus",
     "approval_registry",
 ]
