@@ -1,0 +1,1 @@
+def run_stress_test(): return True

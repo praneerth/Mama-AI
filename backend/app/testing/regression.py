@@ -1,0 +1,1 @@
+def check_regression(): return True

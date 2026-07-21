@@ -1,0 +1,15 @@
+# Colors
+BACKGROUND = "#1E1E1E"
+HEADER = "#252526"
+CHAT = "#2D2D30"
+INPUT = "#3C3C3C"
+
+PRIMARY = "#007ACC"
+SUCCESS = "#28A745"
+TEXT = "#FFFFFF"
+SUBTEXT = "#AAAAAA"
+
+# Fonts
+TITLE_FONT = ("Segoe UI", 24, "bold")
+NORMAL_FONT = ("Segoe UI", 14)
+SMALL_FONT = ("Segoe UI", 12)
