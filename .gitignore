@@ -20,3 +20,19 @@ Desktop.ini
 
 # macOS
 .DS_Store
+
+# Python-generated files
+**/__pycache__/
+*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+
+# Local Python environments
+backend/venv/
+backend/.venv/
+
+# Runtime output
+backend/logs/*.log
+
+# Local recovery copies
+backend/reports/mama_before_engine.py
