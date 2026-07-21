@@ -13,18 +13,61 @@ from app.api.tasks import (
     router as tasks_router,
 )
 from app.config import logger, settings
+from app.core.runtime_state import (
+    initialize_runtime_state,
+    shutdown_runtime_state,
+)
+from app.database.database import initialize_database
 from app.exceptions import register_exception_handlers
 from app.middleware import RequestLoggerMiddleware
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("========== Mama AI Backend Started ==========")
+    """
+    Initialize Mama AI before accepting requests and shut down
+    runtime services safely when the API server stops.
+    """
+
+    logger.info(
+        "========== Mama AI Backend Starting =========="
+    )
+
+    initialize_database()
+
+    runtime_summary = initialize_runtime_state(
+        recover_interrupted=True
+    )
+
+    app.state.runtime_summary = runtime_summary
+
+    logger.info(
+        "Mama AI runtime initialized: %s",
+        runtime_summary,
+    )
+
+    logger.info(
+        "========== Mama AI Backend Started =========="
+    )
 
     try:
         yield
+
     finally:
-        logger.info("========== Mama AI Backend Stopped ==========")
+        logger.info(
+            "========== Mama AI Backend Stopping =========="
+        )
+
+        shutdown_summary = shutdown_runtime_state()
+
+        logger.info(
+            "Mama AI runtime stopped: %s",
+            shutdown_summary,
+        )
+
+        logger.info(
+            "========== Mama AI Backend Stopped =========="
+        )
 
 
 app = FastAPI(
@@ -45,7 +88,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.add_middleware(RequestLoggerMiddleware)
+app.add_middleware(
+    RequestLoggerMiddleware
+)
 
 app.include_router(chat_router)
 app.include_router(health_router)
@@ -54,9 +99,13 @@ app.include_router(memory_router)
 app.include_router(tasks_router)
 app.include_router(queue_router)
 app.include_router(approvals_router)
+
+
 @app.get("/")
 def home():
-    logger.info("Home endpoint accessed")
+    logger.info(
+        "Home endpoint accessed"
+    )
 
     return {
         "success": True,
