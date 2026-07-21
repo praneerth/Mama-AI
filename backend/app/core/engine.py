@@ -11,6 +11,7 @@ from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
+from app.core.event_bus import EventBus, event_bus
 from app.core.task import TaskRequest, TaskResult
 
 
@@ -21,17 +22,18 @@ class MamaEngine:
     """
     Central engine for executing every Mama AI task.
 
-    API, GUI, voice and future mobile clients should eventually use
-    this same engine.
+    API, GUI, voice and future mobile clients should use this same engine.
     """
 
     def __init__(
         self,
         executor: CommandExecutor | None = None,
         logger: logging.Logger | None = None,
+        bus: EventBus | None = None,
     ) -> None:
         self._executor = executor
         self._logger = logger or logging.getLogger("mama_ai.engine")
+        self._event_bus = bus or event_bus
 
     def _get_executor(self) -> CommandExecutor:
         if self._executor is None:
@@ -70,6 +72,55 @@ class MamaEngine:
 
         return str(value)
 
+    def _publish_started(self, request: TaskRequest) -> None:
+        self._event_bus.publish(
+            "task.started",
+            {
+                "task_id": request.task_id,
+                "command": request.command,
+                "source": request.source,
+                "autonomy_level": request.autonomy_level,
+                "risk_level": request.risk_level.value,
+            },
+            source="engine",
+        )
+
+    def _publish_succeeded(
+        self,
+        request: TaskRequest,
+        result: TaskResult,
+    ) -> None:
+        self._event_bus.publish(
+            "task.succeeded",
+            {
+                "task_id": request.task_id,
+                "status": result.status.value,
+                "message": result.message,
+                "evidence_count": len(result.evidence),
+                "finished_at": result.finished_at,
+            },
+            source="engine",
+        )
+
+    def _publish_failed(
+        self,
+        task_id: str,
+        message: str,
+        error: str,
+        *,
+        stage: str,
+    ) -> None:
+        self._event_bus.publish(
+            "task.failed",
+            {
+                "task_id": task_id,
+                "message": message,
+                "error": error,
+                "stage": stage,
+            },
+            source="engine",
+        )
+
     def execute(
         self,
         task: TaskRequest | str,
@@ -88,11 +139,22 @@ class MamaEngine:
                 )
             )
         except Exception as exc:
-            return TaskResult.failed(
-                task_id=uuid4().hex,
+            task_id = uuid4().hex
+
+            result = TaskResult.failed(
+                task_id=task_id,
                 message="The task request is invalid.",
                 error=str(exc),
             )
+
+            self._publish_failed(
+                task_id=task_id,
+                message=result.message,
+                error=str(exc),
+                stage="validation",
+            )
+
+            return result
 
         self._logger.info(
             "Task started | id=%s | command=%s",
@@ -100,8 +162,11 @@ class MamaEngine:
             request.command,
         )
 
+        self._publish_started(request)
+
         try:
             executor = self._get_executor()
+
             raw_output = executor(request.command)
             raw_output = self._resolve_result(raw_output)
 
@@ -126,6 +191,8 @@ class MamaEngine:
                 request.task_id,
             )
 
+            self._publish_succeeded(request, result)
+
             return result
 
         except Exception as exc:
@@ -134,11 +201,20 @@ class MamaEngine:
                 request.task_id,
             )
 
-            return TaskResult.failed(
+            result = TaskResult.failed(
                 task_id=request.task_id,
                 message="Mama AI could not complete the task.",
                 error=str(exc),
             )
+
+            self._publish_failed(
+                task_id=request.task_id,
+                message=result.message,
+                error=str(exc),
+                stage="execution",
+            )
+
+            return result
 
 
 engine = MamaEngine()
