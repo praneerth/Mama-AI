@@ -468,6 +468,133 @@ class SQLiteTaskQueueStore:
         finally:
             connection.close()
 
+
+    def retry_failed(
+        self,
+        task_id: str,
+        *,
+        max_attempts: int = 3,
+        delay_seconds: int = 0,
+    ) -> dict[str, Any]:
+        """
+        Return a failed queue job to the executable queue.
+
+        Only queue records whose current status is ``failed`` can be
+        retried. The attempt counter is reset for a new retry cycle,
+        while ``last_error`` remains available for diagnostics until
+        the job succeeds or fails again.
+        """
+
+        task_id = self._validate_text(
+            task_id,
+            "Task ID",
+        )
+
+        self._validate_max_attempts(
+            max_attempts
+        )
+
+        self._validate_delay(
+            delay_seconds
+        )
+
+        now = self._now()
+
+        available_at = (
+            now
+            + timedelta(
+                seconds=delay_seconds
+            )
+        ).isoformat()
+
+        connection = self._connect()
+
+        try:
+            connection.execute(
+                "BEGIN IMMEDIATE"
+            )
+
+            row = connection.execute(
+                f"""
+                SELECT *
+                FROM {QUEUE_TABLE}
+                WHERE task_id = ?
+                """,
+                (task_id,),
+            ).fetchone()
+
+            if row is None:
+                raise KeyError(
+                    "Queued task was not found: "
+                    f"{task_id}"
+                )
+
+            if row["status"] != "failed":
+                raise ValueError(
+                    "Only failed queue jobs can be "
+                    "retried. Current status: "
+                    f"{row['status']}."
+                )
+
+            cursor = connection.execute(
+                f"""
+                UPDATE {QUEUE_TABLE}
+                SET
+                    status = 'queued',
+                    attempts = 0,
+                    max_attempts = ?,
+                    available_at = ?,
+                    worker_id = NULL,
+                    lease_expires_at = NULL,
+                    updated_at = ?
+                WHERE
+                    task_id = ?
+                    AND status = 'failed'
+                """,
+                (
+                    max_attempts,
+                    available_at,
+                    now.isoformat(),
+                    task_id,
+                ),
+            )
+
+            if cursor.rowcount == 0:
+                raise RuntimeError(
+                    "Failed queue job changed before "
+                    "it could be retried."
+                )
+
+            updated = connection.execute(
+                f"""
+                SELECT *
+                FROM {QUEUE_TABLE}
+                WHERE task_id = ?
+                """,
+                (task_id,),
+            ).fetchone()
+
+            connection.commit()
+
+            result = self._row_to_dict(
+                updated
+            )
+
+            if result is None:
+                raise RuntimeError(
+                    "Retried queue record could "
+                    "not be loaded."
+                )
+
+            return result
+
+        except Exception:
+            connection.rollback()
+            raise
+
+        finally:
+            connection.close()
+
     def cancel_queued(
         self,
         task_id: str,

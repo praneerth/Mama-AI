@@ -200,6 +200,130 @@ class TestSQLiteTaskQueueStore(unittest.TestCase):
         self.assertEqual(stored["status"], "claimed")
         self.assertEqual(stored["worker_id"], "worker-1")
 
+    def test_failed_task_can_be_manually_retried(self) -> None:
+        self.queue.enqueue(
+            "task-1",
+            max_attempts=1,
+        )
+
+        self.queue.claim_next(
+            worker_id="worker-1",
+        )
+
+        failed = self.queue.fail(
+            "task-1",
+            worker_id="worker-1",
+            error="Worker unavailable",
+        )
+
+        self.assertEqual(
+            failed["status"],
+            "failed",
+        )
+
+        retried = self.queue.retry_failed(
+            "task-1",
+            max_attempts=2,
+            delay_seconds=30,
+        )
+
+        expected_available_at = (
+            self.clock.current
+            + timedelta(seconds=30)
+        ).isoformat()
+
+        self.assertEqual(
+            retried["status"],
+            "queued",
+        )
+        self.assertEqual(
+            retried["attempts"],
+            0,
+        )
+        self.assertEqual(
+            retried["max_attempts"],
+            2,
+        )
+        self.assertEqual(
+            retried["available_at"],
+            expected_available_at,
+        )
+        self.assertIsNone(
+            retried["worker_id"]
+        )
+        self.assertIsNone(
+            retried["lease_expires_at"]
+        )
+        self.assertEqual(
+            retried["last_error"],
+            "Worker unavailable",
+        )
+
+    def test_retried_task_respects_delay(self) -> None:
+        self.queue.enqueue(
+            "task-1",
+            max_attempts=1,
+        )
+
+        self.queue.claim_next(
+            worker_id="worker-1",
+        )
+
+        self.queue.fail(
+            "task-1",
+            worker_id="worker-1",
+            error="Temporary failure",
+        )
+
+        self.queue.retry_failed(
+            "task-1",
+            max_attempts=3,
+            delay_seconds=10,
+        )
+
+        unavailable = self.queue.claim_next(
+            worker_id="worker-2",
+        )
+
+        self.assertIsNone(unavailable)
+
+        self.clock.advance(seconds=10)
+
+        claimed = self.queue.claim_next(
+            worker_id="worker-2",
+        )
+
+        self.assertIsNotNone(claimed)
+        self.assertEqual(
+            claimed["status"],
+            "claimed",
+        )
+        self.assertEqual(
+            claimed["attempts"],
+            1,
+        )
+
+    def test_retry_failed_rejects_non_failed_task(self) -> None:
+        self.queue.enqueue("task-1")
+
+        with self.assertRaises(ValueError):
+            self.queue.retry_failed(
+                "task-1"
+            )
+
+        stored = self.queue.get("task-1")
+
+        self.assertEqual(
+            stored["status"],
+            "queued",
+        )
+
+    def test_retry_failed_rejects_missing_task(self) -> None:
+        with self.assertRaises(KeyError):
+            self.queue.retry_failed(
+                "missing-task"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
