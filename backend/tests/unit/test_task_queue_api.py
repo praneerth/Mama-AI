@@ -5,8 +5,11 @@ from fastapi import HTTPException
 
 from app.api.tasks import (
     cancel_task,
+    get_task_attempts,
     get_task_queue,
+    list_failed_queue,
     list_queue,
+    retry_task,
 )
 from app.core.engine import engine
 from app.core.task import (
@@ -70,6 +73,47 @@ class TestTaskQueueAPI(unittest.TestCase):
         )
 
     @patch(
+        "app.api.tasks.task_queue_store.list"
+    )
+    def test_list_failed_queue(
+        self,
+        mock_list,
+    ):
+        mock_list.return_value = [
+            {
+                "task_id": "task-1",
+                "status": "failed",
+                "attempts": 3,
+                "max_attempts": 3,
+            }
+        ]
+
+        response = list_failed_queue(
+            owner_id="local-user",
+            limit=25,
+        )
+
+        self.assertTrue(
+            response["success"]
+        )
+
+        self.assertEqual(
+            response["count"],
+            1,
+        )
+
+        self.assertEqual(
+            response["queue"][0]["status"],
+            "failed",
+        )
+
+        mock_list.assert_called_once_with(
+            status="failed",
+            owner_id="local-user",
+            limit=25,
+        )
+
+    @patch(
         "app.api.tasks.task_queue_store.get"
     )
     def test_get_task_queue(
@@ -108,6 +152,222 @@ class TestTaskQueueAPI(unittest.TestCase):
             context.exception.status_code,
             404,
         )
+
+    @patch(
+        "app.api.tasks.task_queue_store.get"
+    )
+    def test_get_task_attempts(
+        self,
+        mock_get,
+    ):
+        request = self.create_pending_task()
+
+        mock_get.return_value = {
+            "task_id": request.task_id,
+            "status": "failed",
+            "attempts": 3,
+            "max_attempts": 3,
+            "available_at": (
+                "2026-01-01T00:00:00+00:00"
+            ),
+            "last_error": "Engine transport failure",
+        }
+
+        response = get_task_attempts(
+            request.task_id
+        )
+
+        self.assertTrue(
+            response["success"]
+        )
+
+        self.assertEqual(
+            response["attempts"],
+            3,
+        )
+
+        self.assertEqual(
+            response["remaining_attempts"],
+            0,
+        )
+
+        self.assertTrue(
+            response["attempt_cycle_exhausted"]
+        )
+
+        self.assertTrue(
+            response["retryable"]
+        )
+
+    @patch(
+        "app.api.tasks.task_worker.notify"
+    )
+    @patch(
+        "app.api.tasks.task_queue_store.retry_failed"
+    )
+    @patch(
+        "app.api.tasks.task_queue_store.get"
+    )
+    def test_retry_failed_pending_task(
+        self,
+        mock_get,
+        mock_retry,
+        mock_notify,
+    ):
+        request = self.create_pending_task()
+
+        mock_get.return_value = {
+            "task_id": request.task_id,
+            "status": "failed",
+            "attempts": 3,
+            "max_attempts": 3,
+        }
+
+        mock_retry.return_value = {
+            "task_id": request.task_id,
+            "status": "queued",
+            "attempts": 0,
+            "max_attempts": 4,
+        }
+
+        response = retry_task(
+            request.task_id,
+            max_attempts=4,
+            delay_seconds=15,
+        )
+
+        self.assertTrue(
+            response["success"]
+        )
+
+        self.assertEqual(
+            response["task"]["status"],
+            "pending",
+        )
+
+        self.assertEqual(
+            response["queue"]["status"],
+            "queued",
+        )
+
+        mock_retry.assert_called_once_with(
+            request.task_id,
+            max_attempts=4,
+            delay_seconds=15,
+        )
+
+        mock_notify.assert_called_once_with()
+
+    @patch(
+        "app.api.tasks.task_queue_store.retry_failed"
+    )
+    @patch(
+        "app.api.tasks.task_queue_store.get"
+    )
+    def test_retry_rejects_non_failed_queue(
+        self,
+        mock_get,
+        mock_retry,
+    ):
+        request = self.create_pending_task()
+
+        mock_get.return_value = {
+            "task_id": request.task_id,
+            "status": "queued",
+        }
+
+        with self.assertRaises(
+            HTTPException
+        ) as context:
+            retry_task(
+                request.task_id
+            )
+
+        self.assertEqual(
+            context.exception.status_code,
+            409,
+        )
+
+        mock_retry.assert_not_called()
+
+    @patch(
+        "app.api.tasks.task_queue_store.retry_failed"
+    )
+    @patch(
+        "app.api.tasks.task_queue_store.get"
+    )
+    def test_retry_rejects_non_pending_task(
+        self,
+        mock_get,
+        mock_retry,
+    ):
+        request = self.create_pending_task()
+
+        engine.registry.mark_running(
+            request.task_id
+        )
+
+        mock_get.return_value = {
+            "task_id": request.task_id,
+            "status": "failed",
+        }
+
+        with self.assertRaises(
+            HTTPException
+        ) as context:
+            retry_task(
+                request.task_id
+            )
+
+        self.assertEqual(
+            context.exception.status_code,
+            409,
+        )
+
+        mock_retry.assert_not_called()
+
+    def test_retry_missing_task_returns_404(
+        self,
+    ):
+        with self.assertRaises(
+            HTTPException
+        ) as context:
+            retry_task(
+                "missing-task"
+            )
+
+        self.assertEqual(
+            context.exception.status_code,
+            404,
+        )
+
+    @patch(
+        "app.api.tasks.task_queue_store.retry_failed"
+    )
+    @patch(
+        "app.api.tasks.task_queue_store.get"
+    )
+    def test_retry_missing_queue_returns_404(
+        self,
+        mock_get,
+        mock_retry,
+    ):
+        request = self.create_pending_task()
+        mock_get.return_value = None
+
+        with self.assertRaises(
+            HTTPException
+        ) as context:
+            retry_task(
+                request.task_id
+            )
+
+        self.assertEqual(
+            context.exception.status_code,
+            404,
+        )
+
+        mock_retry.assert_not_called()
 
     @patch(
         "app.api.tasks.task_queue_store.cancel_queued"

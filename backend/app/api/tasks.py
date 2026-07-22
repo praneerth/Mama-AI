@@ -12,6 +12,7 @@ from fastapi.encoders import jsonable_encoder
 
 from app.core.engine import engine
 from app.core.task import TaskStatus
+from app.core.task_worker import task_worker
 from app.database.queue_db import task_queue_store
 
 
@@ -127,6 +128,33 @@ def list_queue(
     }
 
 
+@queue_router.get("/queue/failed")
+def list_failed_queue(
+    owner_id: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+) -> dict[str, Any]:
+    """Return failed durable jobs available for manual recovery."""
+
+    try:
+        records = task_queue_store.list(
+            status="failed",
+            owner_id=owner_id,
+            limit=limit,
+        )
+
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    return {
+        "success": True,
+        "count": len(records),
+        "queue": jsonable_encoder(records),
+    }
+
+
 @router.get("/{task_id}/queue")
 def get_task_queue(
     task_id: str,
@@ -159,6 +187,204 @@ def get_task_queue(
         "success": True,
         "queue": jsonable_encoder(
             queue_record
+        ),
+    }
+
+
+@router.get("/{task_id}/attempts")
+def get_task_attempts(
+    task_id: str,
+) -> dict[str, Any]:
+    """Return queue-attempt and manual-retry information for one task."""
+
+    task_id = _clean_task_id(task_id)
+
+    task_record = engine.registry.get(
+        task_id
+    )
+
+    if task_record is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Task was not found: {task_id}",
+        )
+
+    try:
+        queue_record = task_queue_store.get(
+            task_id
+        )
+
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    if queue_record is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Queue record was not found for task: "
+                f"{task_id}"
+            ),
+        )
+
+    attempts = int(
+        queue_record["attempts"]
+    )
+    max_attempts = int(
+        queue_record["max_attempts"]
+    )
+
+    return {
+        "success": True,
+        "task_id": task_id,
+        "task_status": task_record.status.value,
+        "queue_status": queue_record["status"],
+        "attempts": attempts,
+        "max_attempts": max_attempts,
+        "remaining_attempts": max(
+            max_attempts - attempts,
+            0,
+        ),
+        "attempt_cycle_exhausted": (
+            attempts >= max_attempts
+        ),
+        "retryable": (
+            task_record.status
+            == TaskStatus.PENDING
+            and queue_record["status"]
+            == "failed"
+        ),
+        "available_at": queue_record[
+            "available_at"
+        ],
+        "last_error": queue_record[
+            "last_error"
+        ],
+    }
+
+
+@router.post("/{task_id}/retry")
+def retry_task(
+    task_id: str,
+    max_attempts: Annotated[
+        int,
+        Query(ge=1, le=10),
+    ] = 3,
+    delay_seconds: Annotated[
+        int,
+        Query(ge=0, le=86400),
+    ] = 0,
+) -> dict[str, Any]:
+    """
+    Start a new retry cycle for a failed durable job.
+
+    Only a pending task whose durable queue record is failed can be
+    retried. The queue transition is atomic, and the durable worker is
+    notified only after the transition succeeds.
+    """
+
+    task_id = _clean_task_id(task_id)
+
+    task_record = engine.registry.get(
+        task_id
+    )
+
+    if task_record is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Task was not found: {task_id}",
+        )
+
+    if task_record.status != TaskStatus.PENDING:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Only pending tasks with failed queue "
+                "delivery can be retried. Current task "
+                f"status: {task_record.status.value}."
+            ),
+        )
+
+    try:
+        queue_record = task_queue_store.get(
+            task_id
+        )
+
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    if queue_record is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Queue record was not found for task: "
+                f"{task_id}"
+            ),
+        )
+
+    if queue_record["status"] != "failed":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Only failed queue jobs can be retried. "
+                "Current queue status: "
+                f"{queue_record['status']}."
+            ),
+        )
+
+    try:
+        retried_queue = (
+            task_queue_store.retry_failed(
+                task_id,
+                max_attempts=max_attempts,
+                delay_seconds=delay_seconds,
+            )
+        )
+
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+        ) from exc
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+        ) from exc
+
+    except TypeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    task_worker.notify()
+
+    logger.info(
+        "Failed durable task queued for retry | "
+        "task=%s | max_attempts=%s | delay_seconds=%s",
+        task_id,
+        max_attempts,
+        delay_seconds,
+    )
+
+    return {
+        "success": True,
+        "message": (
+            "Failed durable task was queued "
+            "for another retry cycle."
+        ),
+        "task": jsonable_encoder(
+            task_record.to_dict()
+        ),
+        "queue": jsonable_encoder(
+            retried_queue
         ),
     }
 
@@ -333,6 +559,14 @@ def get_task(
 
 
 __all__ = [
+    "cancel_task",
+    "get_task",
+    "get_task_attempts",
+    "get_task_queue",
+    "list_failed_queue",
+    "list_queue",
     "queue_router",
+    "retry_task",
     "router",
+    "task_summary",
 ]
