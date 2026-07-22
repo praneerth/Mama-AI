@@ -20,7 +20,10 @@ from app.core.runtime_state import (
 )
 from app.database.database import initialize_database
 from app.exceptions import register_exception_handlers
-from app.middleware import RequestLoggerMiddleware
+from app.middleware import (
+    RateLimitMiddleware,
+    RequestLoggerMiddleware,
+)
 
 
 @asynccontextmanager
@@ -79,6 +82,16 @@ app = FastAPI(
 
 register_exception_handlers(app)
 
+# Middleware is added from innermost to outermost. CORS remains
+# outermost so rate-limit responses receive the same browser headers.
+app.add_middleware(
+    RateLimitMiddleware
+)
+
+app.add_middleware(
+    RequestLoggerMiddleware
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -87,10 +100,6 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-)
-
-app.add_middleware(
-    RequestLoggerMiddleware
 )
 
 app.include_router(auth_router)

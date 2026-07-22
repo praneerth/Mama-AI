@@ -56,6 +56,35 @@ def _environment_bool(
     )
 
 
+def _environment_int(
+    name: str,
+    default: int,
+    *,
+    minimum: int = 1,
+) -> int:
+    raw_value = os.getenv(name)
+
+    if raw_value is None:
+        return default
+
+    try:
+        value = int(
+            raw_value.strip()
+        )
+
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{name} must be an integer."
+        ) from exc
+
+    if value < minimum:
+        raise ValueError(
+            f"{name} must be at least {minimum}."
+        )
+
+    return value
+
+
 # =====================================================
 # Application
 # =====================================================
@@ -102,6 +131,56 @@ AUTH_TOKEN = os.getenv(
 ).strip()
 
 AUTH_MINIMUM_TOKEN_LENGTH = 32
+
+
+# =====================================================
+# Rate Limiting and Authentication-Abuse Protection
+# =====================================================
+
+RATE_LIMIT_ENABLED = _environment_bool(
+    "MAMA_RATE_LIMIT_ENABLED",
+    True,
+)
+
+RATE_LIMIT_WINDOW_SECONDS = _environment_int(
+    "MAMA_RATE_LIMIT_WINDOW_SECONDS",
+    60,
+)
+
+RATE_LIMIT_GENERAL_REQUESTS = _environment_int(
+    "MAMA_RATE_LIMIT_GENERAL_REQUESTS",
+    120,
+)
+
+RATE_LIMIT_CHAT_REQUESTS = _environment_int(
+    "MAMA_RATE_LIMIT_CHAT_REQUESTS",
+    30,
+)
+
+RATE_LIMIT_MEMORY_WRITE_REQUESTS = _environment_int(
+    "MAMA_RATE_LIMIT_MEMORY_WRITE_REQUESTS",
+    20,
+)
+
+RATE_LIMIT_ACTION_REQUESTS = _environment_int(
+    "MAMA_RATE_LIMIT_ACTION_REQUESTS",
+    20,
+)
+
+AUTH_FAILURE_LIMIT = _environment_int(
+    "MAMA_AUTH_FAILURE_LIMIT",
+    5,
+)
+
+AUTH_FAILURE_WINDOW_SECONDS = _environment_int(
+    "MAMA_AUTH_FAILURE_WINDOW_SECONDS",
+    60,
+)
+
+AUTH_COOLDOWN_SECONDS = _environment_int(
+    "MAMA_AUTH_COOLDOWN_SECONDS",
+    300,
+)
 
 
 # =====================================================
