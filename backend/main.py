@@ -20,6 +20,9 @@ from app.core.runtime_state import (
     shutdown_runtime_state,
 )
 from app.database.database import initialize_database
+from app.database.idempotency_db import (
+    idempotency_store,
+)
 from app.database.security_event_db import (
     security_event_store,
 )
@@ -43,6 +46,7 @@ async def lifespan(app: FastAPI):
 
     initialize_database()
     security_event_store.initialize()
+    idempotency_store.initialize()
 
     runtime_summary = initialize_runtime_state(
         recover_interrupted=True
