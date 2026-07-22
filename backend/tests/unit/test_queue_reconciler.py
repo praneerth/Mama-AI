@@ -227,7 +227,7 @@ class TestQueueReconciler(unittest.TestCase):
             queue_record["worker_id"]
         )
 
-    def test_exhausted_claim_is_cancelled(self):
+    def test_exhausted_claim_is_preserved_for_retry(self):
         request = self.create_task()
 
         self.queue.enqueue(
@@ -250,18 +250,22 @@ class TestQueueReconciler(unittest.TestCase):
         )
 
         self.assertEqual(
-            report.cancelled_inconsistent_tasks,
+            report.preserved_failed_jobs,
             1,
         )
 
         self.assertEqual(
             task_record.status,
-            TaskStatus.CANCELLED,
+            TaskStatus.PENDING,
         )
 
         self.assertEqual(
             queue_record["status"],
             "failed",
+        )
+
+        self.assertIsNone(
+            queue_record["worker_id"]
         )
 
     def test_pending_task_with_completed_queue_is_cancelled(self):
@@ -294,6 +298,65 @@ class TestQueueReconciler(unittest.TestCase):
         self.assertEqual(
             task_record.status,
             TaskStatus.CANCELLED,
+        )
+
+    def test_pending_task_with_failed_queue_is_preserved(self):
+        request = self.create_task()
+
+        self.queue.enqueue(
+            request.task_id,
+            max_attempts=1,
+        )
+
+        self.queue.claim_next(
+            worker_id="worker-1",
+        )
+
+        self.queue.fail(
+            request.task_id,
+            worker_id="worker-1",
+            error="Engine transport failed",
+        )
+
+        first = self.reconciler.reconcile()
+        second = self.reconciler.reconcile()
+
+        task_record = self.registry.get(
+            request.task_id
+        )
+
+        queue_record = self.queue.get(
+            request.task_id
+        )
+
+        self.assertEqual(
+            first.preserved_failed_jobs,
+            1,
+        )
+
+        self.assertEqual(
+            second.preserved_failed_jobs,
+            1,
+        )
+
+        self.assertEqual(
+            first.changes,
+            0,
+        )
+
+        self.assertEqual(
+            second.changes,
+            0,
+        )
+
+        self.assertEqual(
+            task_record.status,
+            TaskStatus.PENDING,
+        )
+
+        self.assertEqual(
+            queue_record["status"],
+            "failed",
         )
 
 

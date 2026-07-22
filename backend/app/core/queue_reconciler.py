@@ -28,9 +28,11 @@ EXECUTABLE_QUEUE_STATUSES = {
 }
 
 
-TERMINAL_QUEUE_STATUSES = {
+FAILED_QUEUE_STATUS = "failed"
+
+
+NON_RECOVERABLE_TERMINAL_QUEUE_STATUSES = {
     "completed",
-    "failed",
     "cancelled",
 }
 
@@ -52,6 +54,7 @@ class QueueReconciliationReport:
     scanned_queue: int = 0
     enqueued_missing: int = 0
     requeued_claimed: int = 0
+    preserved_failed_jobs: int = 0
     cancelled_orphan_jobs: int = 0
     cancelled_non_executable_jobs: int = 0
     cancelled_inconsistent_tasks: int = 0
@@ -77,9 +80,8 @@ class QueueReconciler:
     """
     Repair durable queue and task-state inconsistencies.
 
-    Reconciliation must run before the durable worker starts.
-    Operations fail fast so the worker is never started with state
-    that could not be reconciled safely.
+    Failed queue jobs remain preserved for explicit retry through the
+    retry API. They are not automatically made executable at startup.
     """
 
     def __init__(
@@ -111,8 +113,7 @@ class QueueReconciler:
         """
         Perform one idempotent reconciliation pass.
 
-        Repeating this method after a successful pass does not create
-        duplicate queue records or repeat completed repairs.
+        Failed records are preserved as recoverable dead-letter jobs.
         """
 
         task_records = self._tasks.list()
@@ -179,6 +180,9 @@ class QueueReconciler:
                 self._queue.cancel(task_id)
                 report.cancelled_orphan_jobs += 1
 
+            elif queue_status == FAILED_QUEUE_STATUS:
+                report.preserved_failed_jobs += 1
+
             else:
                 report.unchanged += 1
 
@@ -232,6 +236,10 @@ class QueueReconciler:
             report.unchanged += 1
             return
 
+        if queue_status == FAILED_QUEUE_STATUS:
+            report.preserved_failed_jobs += 1
+            return
+
         if queue_status == "claimed":
             worker_id = queue_record.get(
                 "worker_id"
@@ -266,20 +274,19 @@ class QueueReconciler:
                 report.requeued_claimed += 1
                 return
 
-            self._tasks.cancel(
-                task_id,
-                message=(
-                    "Task cancelled because queue recovery "
-                    "exhausted its maximum attempts."
-                ),
-            )
+            if recovered["status"] == FAILED_QUEUE_STATUS:
+                report.preserved_failed_jobs += 1
+                return
 
-            report.cancelled_inconsistent_tasks += 1
-            return
+            raise RuntimeError(
+                "Recovered claimed queue job returned "
+                "an unsupported status: "
+                f"{recovered['status']}"
+            )
 
         if (
             queue_status
-            in TERMINAL_QUEUE_STATUSES
+            in NON_RECOVERABLE_TERMINAL_QUEUE_STATUSES
         ):
             self._tasks.cancel(
                 task_id,
@@ -304,9 +311,10 @@ queue_reconciler = QueueReconciler(
 
 __all__ = [
     "EXECUTABLE_QUEUE_STATUSES",
+    "FAILED_QUEUE_STATUS",
     "NON_EXECUTABLE_TASK_STATUSES",
+    "NON_RECOVERABLE_TERMINAL_QUEUE_STATUSES",
     "QueueReconciler",
     "QueueReconciliationReport",
-    "TERMINAL_QUEUE_STATUSES",
     "queue_reconciler",
 ]
