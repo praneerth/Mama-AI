@@ -4,21 +4,28 @@ Authenticated approval management API for sensitive Mama AI tasks.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import (
     APIRouter,
     Depends,
+    Header,
     HTTPException,
     Query,
 )
 from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.api.auth import (
     require_principal,
     require_resource_owner,
     resolve_requested_owner,
+)
+from app.api.idempotency import (
+    complete_sensitive_action,
+    fail_sensitive_action,
+    reserve_sensitive_action,
 )
 from app.core.approval_registry import ApprovalStatus
 from app.core.engine import engine
@@ -198,16 +205,22 @@ def get_approval(
     }
 
 
-@router.post("/{approval_id}/approve")
+@router.post(
+    "/{approval_id}/approve",
+    response_model=None,
+)
 def approve_and_execute(
     approval_id: str,
     payload: ApprovalActionRequest | None = None,
-):
+    idempotency_key: Annotated[
+        str | None,
+        Header(
+            alias="Idempotency-Key",
+        ),
+    ] = None,
+) -> dict[str, Any] | JSONResponse:
     """
-    Approve a sensitive task and execute it immediately.
-
-    Identity comes from authentication. A legacy body owner_id is
-    accepted only when it matches the authenticated owner.
+    Approve and execute a sensitive task exactly once per key.
     """
 
     approval_id = _clean_text(
@@ -222,6 +235,72 @@ def approve_and_execute(
             else None
         )
     )
+
+    action_path = (
+        f"/approvals/{approval_id}/approve"
+    )
+
+    replay = reserve_sensitive_action(
+        idempotency_key=(
+            idempotency_key
+        ),
+        owner_id=owner_id,
+        action_path=action_path,
+        request_payload={
+            "action": "approve",
+            "approval_id": approval_id,
+        },
+    )
+
+    if replay is not None:
+        return replay
+
+    try:
+        response_body = (
+            _approve_and_execute_core(
+                approval_id,
+                owner_id,
+            )
+        )
+
+    except HTTPException as exc:
+        fail_sensitive_action(
+            idempotency_key=(
+                idempotency_key
+            ),
+            owner_id=owner_id,
+            status_code=(
+                exc.status_code
+            ),
+            detail=str(
+                exc.detail
+            ),
+            error_code=(
+                "approval_approve_failed"
+            ),
+        )
+        raise
+
+    completed = complete_sensitive_action(
+        idempotency_key=(
+            idempotency_key
+        ),
+        owner_id=owner_id,
+        response_body=response_body,
+    )
+
+    return (
+        completed
+        if completed is not None
+        else response_body
+    )
+
+
+def _approve_and_execute_core(
+    approval_id: str,
+    owner_id: str,
+) -> dict[str, Any]:
+    """Execute the existing approval workflow after reservation."""
 
     approval = engine.approvals.get(
         approval_id
@@ -325,16 +404,22 @@ def approve_and_execute(
     }
 
 
-@router.post("/{approval_id}/reject")
+@router.post(
+    "/{approval_id}/reject",
+    response_model=None,
+)
 def reject_approval(
     approval_id: str,
     payload: ApprovalActionRequest | None = None,
-):
+    idempotency_key: Annotated[
+        str | None,
+        Header(
+            alias="Idempotency-Key",
+        ),
+    ] = None,
+) -> dict[str, Any] | JSONResponse:
     """
-    Reject an approval and cancel its associated task.
-
-    Identity comes from authentication. A legacy body owner_id is
-    accepted only when it matches the authenticated owner.
+    Reject an approval exactly once per Idempotency-Key.
     """
 
     approval_id = _clean_text(
@@ -349,6 +434,72 @@ def reject_approval(
             else None
         )
     )
+
+    action_path = (
+        f"/approvals/{approval_id}/reject"
+    )
+
+    replay = reserve_sensitive_action(
+        idempotency_key=(
+            idempotency_key
+        ),
+        owner_id=owner_id,
+        action_path=action_path,
+        request_payload={
+            "action": "reject",
+            "approval_id": approval_id,
+        },
+    )
+
+    if replay is not None:
+        return replay
+
+    try:
+        response_body = (
+            _reject_approval_core(
+                approval_id,
+                owner_id,
+            )
+        )
+
+    except HTTPException as exc:
+        fail_sensitive_action(
+            idempotency_key=(
+                idempotency_key
+            ),
+            owner_id=owner_id,
+            status_code=(
+                exc.status_code
+            ),
+            detail=str(
+                exc.detail
+            ),
+            error_code=(
+                "approval_reject_failed"
+            ),
+        )
+        raise
+
+    completed = complete_sensitive_action(
+        idempotency_key=(
+            idempotency_key
+        ),
+        owner_id=owner_id,
+        response_body=response_body,
+    )
+
+    return (
+        completed
+        if completed is not None
+        else response_body
+    )
+
+
+def _reject_approval_core(
+    approval_id: str,
+    owner_id: str,
+) -> dict[str, Any]:
+    """Execute the existing rejection workflow after reservation."""
 
     approval = engine.approvals.get(
         approval_id

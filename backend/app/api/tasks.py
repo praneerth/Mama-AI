@@ -10,15 +10,22 @@ from typing import Annotated, Any
 from fastapi import (
     APIRouter,
     Depends,
+    Header,
     HTTPException,
     Query,
 )
 from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 
 from app.api.auth import (
     require_principal,
     require_resource_owner,
     resolve_requested_owner,
+)
+from app.api.idempotency import (
+    complete_sensitive_action,
+    fail_sensitive_action,
+    reserve_sensitive_action,
 )
 from app.core.engine import engine
 from app.core.task import TaskStatus
@@ -458,7 +465,10 @@ def get_task_history(
     }
 
 
-@router.post("/{task_id}/retry")
+@router.post(
+    "/{task_id}/retry",
+    response_model=None,
+)
 def retry_task(
     task_id: str,
     max_attempts: Annotated[
@@ -469,12 +479,95 @@ def retry_task(
         int,
         Query(ge=0, le=86400),
     ] = 0,
-) -> dict[str, Any]:
-    """Start a new retry cycle for an owned failed durable job."""
+    idempotency_key: Annotated[
+        str | None,
+        Header(
+            alias="Idempotency-Key",
+        ),
+    ] = None,
+) -> dict[str, Any] | JSONResponse:
+    """Start one idempotent retry cycle for an owned failed job."""
 
     task_id = _clean_task_id(
         task_id
     )
+    owner_id = (
+        resolve_requested_owner(
+            None
+        )
+    )
+    action_path = (
+        f"/tasks/{task_id}/retry"
+    )
+
+    replay = reserve_sensitive_action(
+        idempotency_key=(
+            idempotency_key
+        ),
+        owner_id=owner_id,
+        action_path=action_path,
+        request_payload={
+            "action": "retry",
+            "task_id": task_id,
+            "max_attempts": (
+                max_attempts
+            ),
+            "delay_seconds": (
+                delay_seconds
+            ),
+        },
+    )
+
+    if replay is not None:
+        return replay
+
+    try:
+        response_body = _retry_task_core(
+            task_id,
+            max_attempts=max_attempts,
+            delay_seconds=delay_seconds,
+        )
+
+    except HTTPException as exc:
+        fail_sensitive_action(
+            idempotency_key=(
+                idempotency_key
+            ),
+            owner_id=owner_id,
+            status_code=(
+                exc.status_code
+            ),
+            detail=str(
+                exc.detail
+            ),
+            error_code=(
+                "task_retry_failed"
+            ),
+        )
+        raise
+
+    completed = complete_sensitive_action(
+        idempotency_key=(
+            idempotency_key
+        ),
+        owner_id=owner_id,
+        response_body=response_body,
+    )
+
+    return (
+        completed
+        if completed is not None
+        else response_body
+    )
+
+
+def _retry_task_core(
+    task_id: str,
+    *,
+    max_attempts: int,
+    delay_seconds: int,
+) -> dict[str, Any]:
+    """Execute the existing retry workflow after reservation."""
 
     task_record = engine.registry.get(
         task_id
@@ -568,15 +661,92 @@ def retry_task(
     }
 
 
-@router.post("/{task_id}/cancel")
+@router.post(
+    "/{task_id}/cancel",
+    response_model=None,
+)
 def cancel_task(
     task_id: str,
-) -> dict[str, Any]:
-    """Safely cancel one owned pending durable task."""
+    idempotency_key: Annotated[
+        str | None,
+        Header(
+            alias="Idempotency-Key",
+        ),
+    ] = None,
+) -> dict[str, Any] | JSONResponse:
+    """Safely cancel one task exactly once per key."""
 
     task_id = _clean_task_id(
         task_id
     )
+    owner_id = (
+        resolve_requested_owner(
+            None
+        )
+    )
+    action_path = (
+        f"/tasks/{task_id}/cancel"
+    )
+
+    replay = reserve_sensitive_action(
+        idempotency_key=(
+            idempotency_key
+        ),
+        owner_id=owner_id,
+        action_path=action_path,
+        request_payload={
+            "action": "cancel",
+            "task_id": task_id,
+        },
+    )
+
+    if replay is not None:
+        return replay
+
+    try:
+        response_body = (
+            _cancel_task_core(
+                task_id
+            )
+        )
+
+    except HTTPException as exc:
+        fail_sensitive_action(
+            idempotency_key=(
+                idempotency_key
+            ),
+            owner_id=owner_id,
+            status_code=(
+                exc.status_code
+            ),
+            detail=str(
+                exc.detail
+            ),
+            error_code=(
+                "task_cancel_failed"
+            ),
+        )
+        raise
+
+    completed = complete_sensitive_action(
+        idempotency_key=(
+            idempotency_key
+        ),
+        owner_id=owner_id,
+        response_body=response_body,
+    )
+
+    return (
+        completed
+        if completed is not None
+        else response_body
+    )
+
+
+def _cancel_task_core(
+    task_id: str,
+) -> dict[str, Any]:
+    """Execute the existing cancellation workflow after reservation."""
 
     task_record = engine.registry.get(
         task_id
