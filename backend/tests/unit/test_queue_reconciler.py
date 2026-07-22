@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -56,6 +57,31 @@ class TestQueueReconciler(unittest.TestCase):
 
         return request
 
+    def reconciliation_events(
+        self,
+        task_id,
+    ):
+        return list(
+            reversed(
+                self.queue.audit_store.list(
+                    task_id=task_id,
+                    event_type="reconciled",
+                    limit=100,
+                )
+            )
+        )
+
+    def latest_reconciliation(
+        self,
+        task_id,
+    ):
+        events = self.reconciliation_events(
+            task_id
+        )
+
+        self.assertTrue(events)
+        return events[-1]
+
     def test_pending_task_without_queue_is_enqueued(self):
         request = self.create_task()
 
@@ -65,8 +91,17 @@ class TestQueueReconciler(unittest.TestCase):
             request.task_id
         )
 
+        event = self.latest_reconciliation(
+            request.task_id
+        )
+
         self.assertEqual(
             report.enqueued_missing,
+            1,
+        )
+
+        self.assertEqual(
+            report.recorded_audit_events,
             1,
         )
 
@@ -77,8 +112,15 @@ class TestQueueReconciler(unittest.TestCase):
             "queued",
         )
 
+        self.assertEqual(
+            event["metadata"][
+                "reconciliation_action"
+            ],
+            "enqueued_missing_queue",
+        )
+
     def test_reconciliation_is_idempotent(self):
-        self.create_task()
+        request = self.create_task()
 
         first = self.reconciler.reconcile()
         second = self.reconciler.reconcile()
@@ -93,6 +135,15 @@ class TestQueueReconciler(unittest.TestCase):
             0,
         )
 
+        self.assertEqual(
+            len(
+                self.reconciliation_events(
+                    request.task_id
+                )
+            ),
+            1,
+        )
+
     def test_orphan_queued_job_is_cancelled(self):
         self.queue.enqueue(
             "orphan-task"
@@ -104,6 +155,10 @@ class TestQueueReconciler(unittest.TestCase):
             "orphan-task"
         )
 
+        event = self.latest_reconciliation(
+            "orphan-task"
+        )
+
         self.assertEqual(
             report.cancelled_orphan_jobs,
             1,
@@ -112,6 +167,61 @@ class TestQueueReconciler(unittest.TestCase):
         self.assertEqual(
             stored["status"],
             "cancelled",
+        )
+
+        self.assertEqual(
+            event["metadata"][
+                "reconciliation_action"
+            ],
+            "cancelled_orphan_queue_job",
+        )
+
+    def test_orphan_failed_job_is_preserved_once(self):
+        self.queue.enqueue(
+            "orphan-task",
+            max_attempts=1,
+        )
+
+        self.queue.claim_next(
+            worker_id="worker-1"
+        )
+
+        self.queue.fail(
+            "orphan-task",
+            worker_id="worker-1",
+            error="Delivery failed",
+        )
+
+        first = self.reconciler.reconcile()
+        second = self.reconciler.reconcile()
+
+        self.assertEqual(
+            first.preserved_failed_jobs,
+            1,
+        )
+
+        self.assertEqual(
+            second.preserved_failed_jobs,
+            1,
+        )
+
+        self.assertEqual(
+            first.recorded_audit_events,
+            1,
+        )
+
+        self.assertEqual(
+            second.recorded_audit_events,
+            0,
+        )
+
+        self.assertEqual(
+            len(
+                self.reconciliation_events(
+                    "orphan-task"
+                )
+            ),
+            1,
         )
 
     def test_terminal_task_queue_job_is_cancelled(self):
@@ -138,6 +248,10 @@ class TestQueueReconciler(unittest.TestCase):
             request.task_id
         )
 
+        event = self.latest_reconciliation(
+            request.task_id
+        )
+
         self.assertEqual(
             report.cancelled_non_executable_jobs,
             1,
@@ -146,6 +260,13 @@ class TestQueueReconciler(unittest.TestCase):
         self.assertEqual(
             stored["status"],
             "cancelled",
+        )
+
+        self.assertEqual(
+            event["metadata"][
+                "reconciliation_action"
+            ],
+            "cancelled_non_executable_queue_job",
         )
 
     def test_waiting_approval_job_is_not_executed_again(self):
@@ -171,6 +292,10 @@ class TestQueueReconciler(unittest.TestCase):
             request.task_id
         )
 
+        event = self.latest_reconciliation(
+            request.task_id
+        )
+
         self.assertEqual(
             report.cancelled_non_executable_jobs,
             1,
@@ -184,6 +309,11 @@ class TestQueueReconciler(unittest.TestCase):
         self.assertEqual(
             queue_record["status"],
             "cancelled",
+        )
+
+        self.assertEqual(
+            event["metadata"]["task_status"],
+            "waiting_approval",
         )
 
     def test_stale_claimed_job_is_requeued(self):
@@ -208,6 +338,10 @@ class TestQueueReconciler(unittest.TestCase):
             request.task_id
         )
 
+        event = self.latest_reconciliation(
+            request.task_id
+        )
+
         self.assertEqual(
             report.requeued_claimed,
             1,
@@ -225,6 +359,18 @@ class TestQueueReconciler(unittest.TestCase):
 
         self.assertIsNone(
             queue_record["worker_id"]
+        )
+
+        self.assertEqual(
+            event["queue_status"],
+            "queued",
+        )
+
+        self.assertEqual(
+            event["metadata"][
+                "reconciliation_action"
+            ],
+            "recovered_claimed_queue_job",
         )
 
     def test_exhausted_claim_is_preserved_for_retry(self):
@@ -249,6 +395,10 @@ class TestQueueReconciler(unittest.TestCase):
             request.task_id
         )
 
+        event = self.latest_reconciliation(
+            request.task_id
+        )
+
         self.assertEqual(
             report.preserved_failed_jobs,
             1,
@@ -266,6 +416,70 @@ class TestQueueReconciler(unittest.TestCase):
 
         self.assertIsNone(
             queue_record["worker_id"]
+        )
+
+        self.assertEqual(
+            event["queue_status"],
+            "failed",
+        )
+
+    def test_claim_without_worker_is_cancelled(self):
+        request = self.create_task()
+
+        self.queue.enqueue(
+            request.task_id
+        )
+
+        self.queue.claim_next(
+            worker_id="worker-1"
+        )
+
+        with sqlite3.connect(
+            self.database_path
+        ) as connection:
+            connection.execute(
+                """
+                UPDATE task_queue
+                SET worker_id = NULL
+                WHERE task_id = ?
+                """,
+                (request.task_id,),
+            )
+
+        report = self.reconciler.reconcile()
+
+        task_record = self.registry.get(
+            request.task_id
+        )
+
+        queue_record = self.queue.get(
+            request.task_id
+        )
+
+        event = self.latest_reconciliation(
+            request.task_id
+        )
+
+        self.assertEqual(
+            report.cancelled_inconsistent_tasks,
+            1,
+        )
+
+        self.assertEqual(
+            task_record.status,
+            TaskStatus.CANCELLED,
+        )
+
+        self.assertEqual(
+            queue_record["status"],
+            "cancelled",
+        )
+
+        self.assertEqual(
+            event["metadata"][
+                "reconciliation_action"
+            ],
+            "cancelled_claim_without_worker",
         )
 
     def test_pending_task_with_completed_queue_is_cancelled(self):
@@ -290,6 +504,10 @@ class TestQueueReconciler(unittest.TestCase):
             request.task_id
         )
 
+        event = self.latest_reconciliation(
+            request.task_id
+        )
+
         self.assertEqual(
             report.cancelled_inconsistent_tasks,
             1,
@@ -298,6 +516,13 @@ class TestQueueReconciler(unittest.TestCase):
         self.assertEqual(
             task_record.status,
             TaskStatus.CANCELLED,
+        )
+
+        self.assertEqual(
+            event["metadata"][
+                "reconciliation_action"
+            ],
+            "cancelled_task_for_terminal_queue",
         )
 
     def test_pending_task_with_failed_queue_is_preserved(self):
@@ -350,6 +575,16 @@ class TestQueueReconciler(unittest.TestCase):
         )
 
         self.assertEqual(
+            first.recorded_audit_events,
+            1,
+        )
+
+        self.assertEqual(
+            second.recorded_audit_events,
+            0,
+        )
+
+        self.assertEqual(
             task_record.status,
             TaskStatus.PENDING,
         )
@@ -357,6 +592,15 @@ class TestQueueReconciler(unittest.TestCase):
         self.assertEqual(
             queue_record["status"],
             "failed",
+        )
+
+        self.assertEqual(
+            len(
+                self.reconciliation_events(
+                    request.task_id
+                )
+            ),
+            1,
         )
 
 

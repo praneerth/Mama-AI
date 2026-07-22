@@ -4,6 +4,10 @@ Startup reconciliation for Mama AI's task registry and durable queue.
 Reconciliation runs after persistent task state is restored and before
 the background worker starts. This prevents stale or inconsistent queue
 records from being executed.
+
+Every repair is recorded as a persistent ``reconciled`` attempt-audit
+event. Observation-only preservation events are deduplicated so repeated
+startup passes remain idempotent.
 """
 
 from __future__ import annotations
@@ -58,6 +62,7 @@ class QueueReconciliationReport:
     cancelled_orphan_jobs: int = 0
     cancelled_non_executable_jobs: int = 0
     cancelled_inconsistent_tasks: int = 0
+    recorded_audit_events: int = 0
     unchanged: int = 0
 
     @property
@@ -156,9 +161,23 @@ class QueueReconciler:
                 self._queue.enqueue(
                     task_record.task_id,
                     owner_id=self._default_owner_id,
+                    audit_event_type="reconciled",
+                    audit_message=(
+                        "Startup reconciliation recreated "
+                        "a missing durable queue job."
+                    ),
+                    audit_metadata={
+                        "reconciliation_action": (
+                            "enqueued_missing_queue"
+                        ),
+                        "task_status": (
+                            task_record.status.value
+                        ),
+                    },
                 )
 
                 report.enqueued_missing += 1
+                report.recorded_audit_events += 1
 
         return report
 
@@ -177,11 +196,31 @@ class QueueReconciler:
                 queue_status
                 in EXECUTABLE_QUEUE_STATUSES
             ):
-                self._queue.cancel(task_id)
+                self._queue.cancel(
+                    task_id,
+                    audit_event_type="reconciled",
+                    audit_message=(
+                        "Startup reconciliation cancelled "
+                        "an executable orphan queue job."
+                    ),
+                    audit_metadata={
+                        "reconciliation_action": (
+                            "cancelled_orphan_queue_job"
+                        ),
+                        "task_record_present": False,
+                    },
+                )
+
                 report.cancelled_orphan_jobs += 1
+                report.recorded_audit_events += 1
 
             elif queue_status == FAILED_QUEUE_STATUS:
-                report.preserved_failed_jobs += 1
+                self._record_preserved_failed(
+                    task_id=task_id,
+                    task_status=None,
+                    report=report,
+                    reason="orphan_failed_queue_job",
+                )
 
             else:
                 report.unchanged += 1
@@ -198,9 +237,24 @@ class QueueReconciler:
                 queue_status
                 in EXECUTABLE_QUEUE_STATUSES
             ):
-                self._queue.cancel(task_id)
+                self._queue.cancel(
+                    task_id,
+                    audit_event_type="reconciled",
+                    audit_message=(
+                        "Startup reconciliation cancelled "
+                        "a queue job whose task state was "
+                        "not executable."
+                    ),
+                    audit_metadata={
+                        "reconciliation_action": (
+                            "cancelled_non_executable_queue_job"
+                        ),
+                        "task_status": task_status.value,
+                    },
+                )
 
                 report.cancelled_non_executable_jobs += 1
+                report.recorded_audit_events += 1
 
             else:
                 report.unchanged += 1
@@ -212,9 +266,24 @@ class QueueReconciler:
                 queue_status
                 in EXECUTABLE_QUEUE_STATUSES
             ):
-                self._queue.cancel(task_id)
+                self._queue.cancel(
+                    task_id,
+                    audit_event_type="reconciled",
+                    audit_message=(
+                        "Startup reconciliation cancelled "
+                        "the queue job for a task still "
+                        "marked as running."
+                    ),
+                    audit_metadata={
+                        "reconciliation_action": (
+                            "cancelled_running_task_queue_job"
+                        ),
+                        "task_status": task_status.value,
+                    },
+                )
 
                 report.cancelled_non_executable_jobs += 1
+                report.recorded_audit_events += 1
 
             self._tasks.cancel(
                 task_id,
@@ -226,6 +295,32 @@ class QueueReconciler:
             )
 
             report.cancelled_inconsistent_tasks += 1
+
+            if (
+                queue_status
+                not in EXECUTABLE_QUEUE_STATUSES
+            ):
+                _, created = (
+                    self._queue.record_reconciliation(
+                        task_id,
+                        action=(
+                            "cancelled_inconsistent_running_task"
+                        ),
+                        message=(
+                            "Startup reconciliation cancelled "
+                            "a task still marked as running."
+                        ),
+                        metadata={
+                            "task_status": (
+                                task_status.value
+                            ),
+                        },
+                    )
+                )
+
+                if created:
+                    report.recorded_audit_events += 1
+
             return
 
         if task_status != TaskStatus.PENDING:
@@ -237,7 +332,12 @@ class QueueReconciler:
             return
 
         if queue_status == FAILED_QUEUE_STATUS:
-            report.preserved_failed_jobs += 1
+            self._record_preserved_failed(
+                task_id=task_id,
+                task_status=task_status,
+                report=report,
+                reason="pending_task_failed_queue_job",
+            )
             return
 
         if queue_status == "claimed":
@@ -246,7 +346,21 @@ class QueueReconciler:
             )
 
             if not worker_id:
-                self._queue.cancel(task_id)
+                self._queue.cancel(
+                    task_id,
+                    audit_event_type="reconciled",
+                    audit_message=(
+                        "Startup reconciliation cancelled "
+                        "a claimed queue job with no worker "
+                        "identity."
+                    ),
+                    audit_metadata={
+                        "reconciliation_action": (
+                            "cancelled_claim_without_worker"
+                        ),
+                        "task_status": task_status.value,
+                    },
+                )
 
                 self._tasks.cancel(
                     task_id,
@@ -258,6 +372,7 @@ class QueueReconciler:
 
                 report.cancelled_non_executable_jobs += 1
                 report.cancelled_inconsistent_tasks += 1
+                report.recorded_audit_events += 1
                 return
 
             recovered = self._queue.fail(
@@ -268,7 +383,23 @@ class QueueReconciler:
                     "backend startup reconciliation."
                 ),
                 retry_delay_seconds=0,
+                audit_event_type="reconciled",
+                audit_message=(
+                    "Startup reconciliation recovered "
+                    "a stale claimed queue job."
+                ),
+                audit_metadata={
+                    "reconciliation_action": (
+                        "recovered_claimed_queue_job"
+                    ),
+                    "task_status": task_status.value,
+                    "previous_queue_status": (
+                        queue_status
+                    ),
+                },
             )
+
+            report.recorded_audit_events += 1
 
             if recovered["status"] == "queued":
                 report.requeued_claimed += 1
@@ -297,10 +428,65 @@ class QueueReconciler:
                 ),
             )
 
+            _, created = (
+                self._queue.record_reconciliation(
+                    task_id,
+                    action=(
+                        "cancelled_task_for_terminal_queue"
+                    ),
+                    message=(
+                        "Startup reconciliation cancelled "
+                        "a pending task whose queue record "
+                        f"was already {queue_status}."
+                    ),
+                    metadata={
+                        "task_status": task_status.value,
+                        "queue_status": queue_status,
+                    },
+                )
+            )
+
+            if created:
+                report.recorded_audit_events += 1
+
             report.cancelled_inconsistent_tasks += 1
             return
 
         report.unchanged += 1
+
+    def _record_preserved_failed(
+        self,
+        *,
+        task_id: str,
+        task_status: TaskStatus | None,
+        report: QueueReconciliationReport,
+        reason: str,
+    ) -> None:
+        _, created = (
+            self._queue.record_reconciliation(
+                task_id,
+                action="preserved_failed_queue_job",
+                message=(
+                    "Startup reconciliation preserved "
+                    "a failed queue job for explicit "
+                    "manual retry."
+                ),
+                metadata={
+                    "reason": reason,
+                    "task_status": (
+                        task_status.value
+                        if task_status is not None
+                        else None
+                    ),
+                },
+                deduplicate=True,
+            )
+        )
+
+        report.preserved_failed_jobs += 1
+
+        if created:
+            report.recorded_audit_events += 1
 
 
 queue_reconciler = QueueReconciler(

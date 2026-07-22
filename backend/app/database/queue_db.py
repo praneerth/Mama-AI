@@ -11,13 +11,15 @@ therefore either both commit or both roll back.
 
 from __future__ import annotations
 
+import json
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from app.database.attempt_audit_db import (
+    ATTEMPT_AUDIT_TABLE,
     SQLiteAttemptAuditStore,
 )
 from app.database.database import DATABASE_PATH
@@ -151,6 +153,9 @@ class SQLiteTaskQueueStore:
         owner_id: str = "local-user",
         max_attempts: int = 3,
         delay_seconds: int = 0,
+        audit_event_type: str = "enqueued",
+        audit_message: str | None = None,
+        audit_metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         task_id = self._validate_text(
             task_id,
@@ -168,6 +173,16 @@ class SQLiteTaskQueueStore:
 
         available_at = (
             now + timedelta(seconds=delay_seconds)
+        )
+
+        metadata = self._merge_audit_metadata(
+            {
+                "owner_id": owner_id,
+                "max_attempts": max_attempts,
+                "delay_seconds": delay_seconds,
+                "available_at": available_at.isoformat(),
+            },
+            audit_metadata,
         )
 
         connection = self._connect()
@@ -205,15 +220,13 @@ class SQLiteTaskQueueStore:
             self._audit.append(
                 task_id=task_id,
                 attempt=0,
-                event_type="enqueued",
+                event_type=audit_event_type,
                 queue_status="queued",
-                message="Task added to the durable queue.",
-                metadata={
-                    "owner_id": owner_id,
-                    "max_attempts": max_attempts,
-                    "delay_seconds": delay_seconds,
-                    "available_at": available_at.isoformat(),
-                },
+                message=(
+                    audit_message
+                    or "Task added to the durable queue."
+                ),
+                metadata=metadata,
                 created_at=now.isoformat(),
                 connection=connection,
             )
@@ -540,6 +553,9 @@ class SQLiteTaskQueueStore:
         worker_id: str,
         error: str,
         retry_delay_seconds: int = 0,
+        audit_event_type: str | None = None,
+        audit_message: str | None = None,
+        audit_metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         task_id = self._validate_text(
             task_id,
@@ -589,8 +605,8 @@ class SQLiteTaskQueueStore:
 
             if should_retry:
                 status = "queued"
-                event_type = "retry_scheduled"
-                message = (
+                default_event_type = "retry_scheduled"
+                default_message = (
                     "Queue delivery failed; another "
                     "automatic attempt was scheduled."
                 )
@@ -604,12 +620,25 @@ class SQLiteTaskQueueStore:
 
             else:
                 status = "failed"
-                event_type = "failed"
-                message = (
+                default_event_type = "failed"
+                default_message = (
                     "Queue delivery failed and the "
                     "attempt cycle was exhausted."
                 )
                 available_at = row["available_at"]
+
+            metadata = self._merge_audit_metadata(
+                {
+                    "retry_delay_seconds": (
+                        retry_delay_seconds
+                    ),
+                    "max_attempts": int(
+                        row["max_attempts"]
+                    ),
+                    "available_at": available_at,
+                },
+                audit_metadata,
+            )
 
             connection.execute(
                 f"""
@@ -635,20 +664,18 @@ class SQLiteTaskQueueStore:
             self._audit.append(
                 task_id=task_id,
                 attempt=int(row["attempts"]),
-                event_type=event_type,
+                event_type=(
+                    audit_event_type
+                    or default_event_type
+                ),
                 queue_status=status,
                 worker_id=worker_id,
-                message=message,
+                message=(
+                    audit_message
+                    or default_message
+                ),
                 error=error,
-                metadata={
-                    "retry_delay_seconds": (
-                        retry_delay_seconds
-                    ),
-                    "max_attempts": int(
-                        row["max_attempts"]
-                    ),
-                    "available_at": available_at,
-                },
+                metadata=metadata,
                 created_at=now_text,
                 connection=connection,
             )
@@ -919,6 +946,10 @@ class SQLiteTaskQueueStore:
     def cancel(
         self,
         task_id: str,
+        *,
+        audit_event_type: str = "cancelled",
+        audit_message: str | None = None,
+        audit_metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Cancel a queued or claimed task for internal reconciliation."""
 
@@ -967,20 +998,28 @@ class SQLiteTaskQueueStore:
                     f"status {row['status']}."
                 )
 
-            self._audit.append(
-                task_id=task_id,
-                attempt=int(row["attempts"]),
-                event_type="cancelled",
-                queue_status="cancelled",
-                worker_id=row["worker_id"],
-                message=(
-                    "Queue job cancelled by an internal "
-                    "runtime operation."
-                ),
-                metadata={
+            metadata = self._merge_audit_metadata(
+                {
                     "previous_status": row["status"],
                     "cancellation_mode": "internal",
                 },
+                audit_metadata,
+            )
+
+            self._audit.append(
+                task_id=task_id,
+                attempt=int(row["attempts"]),
+                event_type=audit_event_type,
+                queue_status="cancelled",
+                worker_id=row["worker_id"],
+                message=(
+                    audit_message
+                    or (
+                        "Queue job cancelled by an internal "
+                        "runtime operation."
+                    )
+                ),
+                metadata=metadata,
                 created_at=now,
                 connection=connection,
             )
@@ -1000,6 +1039,135 @@ class SQLiteTaskQueueStore:
                 )
 
             return result
+
+        except Exception:
+            connection.rollback()
+            raise
+
+        finally:
+            connection.close()
+
+    def record_reconciliation(
+        self,
+        task_id: str,
+        *,
+        action: str,
+        message: str,
+        metadata: Mapping[str, Any] | None = None,
+        deduplicate: bool = True,
+    ) -> tuple[dict[str, Any], bool]:
+        """
+        Record a reconciliation observation that does not change queue
+        state.
+
+        Consecutive events with the same task, action, queue status and
+        attempt are deduplicated. This keeps repeated startup passes
+        idempotent while allowing a later lifecycle change to produce a
+        new reconciliation record.
+        """
+
+        task_id = self._validate_text(
+            task_id,
+            "Task ID",
+        )
+        action = self._validate_text(
+            action,
+            "Reconciliation action",
+        )
+        message = self._validate_text(
+            message,
+            "Reconciliation message",
+        )
+
+        if not isinstance(deduplicate, bool):
+            raise TypeError(
+                "Deduplicate must be boolean."
+            )
+
+        metadata_dict = self._merge_audit_metadata(
+            {
+                "reconciliation_action": action,
+            },
+            metadata,
+        )
+
+        now = self._now().isoformat()
+        connection = self._connect()
+
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+
+            row = self._select_task(
+                connection,
+                task_id,
+            )
+
+            if row is None:
+                raise KeyError(
+                    f"Queued task was not found: {task_id}"
+                )
+
+            if deduplicate:
+                latest = connection.execute(
+                    f"""
+                    SELECT *
+                    FROM {ATTEMPT_AUDIT_TABLE}
+                    WHERE
+                        task_id = ?
+                        AND event_type = 'reconciled'
+                    ORDER BY sequence_id DESC
+                    LIMIT 1
+                    """,
+                    (task_id,),
+                ).fetchone()
+
+                if latest is not None:
+                    latest_metadata = self._load_metadata(
+                        latest["metadata_json"]
+                    )
+
+                    same_observation = (
+                        latest["attempt"]
+                        == row["attempts"]
+                        and latest["queue_status"]
+                        == row["status"]
+                        and latest_metadata.get(
+                            "reconciliation_action"
+                        )
+                        == action
+                    )
+
+                    if same_observation:
+                        audit_id = latest["audit_id"]
+                        connection.commit()
+
+                        existing = self._audit.get(
+                            audit_id
+                        )
+
+                        if existing is None:
+                            raise RuntimeError(
+                                "Existing reconciliation audit "
+                                "record could not be loaded."
+                            )
+
+                        return existing, False
+
+            created = self._audit.append(
+                task_id=task_id,
+                attempt=int(row["attempts"]),
+                event_type="reconciled",
+                queue_status=row["status"],
+                worker_id=row["worker_id"],
+                message=message,
+                error=row["last_error"],
+                metadata=metadata_dict,
+                created_at=now,
+                connection=connection,
+            )
+
+            connection.commit()
+            return created, True
 
         except Exception:
             connection.rollback()
@@ -1152,6 +1320,51 @@ class SQLiteTaskQueueStore:
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
+
+    @staticmethod
+    def _merge_audit_metadata(
+        base: Mapping[str, Any],
+        extra: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not isinstance(base, Mapping):
+            raise TypeError(
+                "Base audit metadata must be a mapping."
+            )
+
+        merged = dict(base)
+
+        if extra is None:
+            return merged
+
+        if not isinstance(extra, Mapping):
+            raise TypeError(
+                "Audit metadata must be a mapping."
+            )
+
+        merged.update(dict(extra))
+        return merged
+
+    @staticmethod
+    def _load_metadata(
+        value: str | None,
+    ) -> dict[str, Any]:
+        if value is None or value == "":
+            return {}
+
+        try:
+            loaded = json.loads(value)
+
+        except (
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ):
+            return {}
+
+        if not isinstance(loaded, dict):
+            return {}
+
+        return loaded
 
     @staticmethod
     def _validate_text(
