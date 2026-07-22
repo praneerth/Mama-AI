@@ -13,6 +13,9 @@ from fastapi.encoders import jsonable_encoder
 from app.core.engine import engine
 from app.core.task import TaskStatus
 from app.core.task_worker import task_worker
+from app.database.attempt_audit_db import (
+    attempt_audit_store,
+)
 from app.database.queue_db import task_queue_store
 
 
@@ -262,6 +265,75 @@ def get_task_attempts(
         "last_error": queue_record[
             "last_error"
         ],
+    }
+
+
+@router.get("/{task_id}/history")
+def get_task_history(
+    task_id: str,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=1000),
+    ] = 100,
+) -> dict[str, Any]:
+    """
+    Return one task together with its persistent queue-attempt history.
+
+    Audit records are converted from storage's newest-first order into
+    chronological order so the lifecycle can be read from start to end.
+    """
+
+    task_id = _clean_task_id(
+        task_id
+    )
+
+    task_record = engine.registry.get(
+        task_id
+    )
+
+    if task_record is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Task was not found: {task_id}",
+        )
+
+    try:
+        queue_record = task_queue_store.get(
+            task_id
+        )
+
+        audit_records = (
+            attempt_audit_store.list(
+                task_id=task_id,
+                limit=limit,
+            )
+        )
+
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    chronological_history = list(
+        reversed(audit_records)
+    )
+
+    return {
+        "success": True,
+        "task": jsonable_encoder(
+            task_record.to_dict()
+        ),
+        "queue": jsonable_encoder(
+            queue_record
+        ),
+        "count": len(
+            chronological_history
+        ),
+        "order": "oldest_first",
+        "history": jsonable_encoder(
+            chronological_history
+        ),
     }
 
 
@@ -562,6 +634,7 @@ __all__ = [
     "cancel_task",
     "get_task",
     "get_task_attempts",
+    "get_task_history",
     "get_task_queue",
     "list_failed_queue",
     "list_queue",
