@@ -1,8 +1,12 @@
 """
 Durable SQLite task queue for Mama AI.
 
-The queue stores only execution scheduling information. Complete task
+The queue stores execution scheduling information. Complete task
 details and results remain in the existing task_state table.
+
+Every queue-state transition is written to the persistent attempt audit
+log in the same SQLite transaction. A queue update and its audit event
+therefore either both commit or both roll back.
 """
 
 from __future__ import annotations
@@ -13,6 +17,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from app.database.attempt_audit_db import (
+    SQLiteAttemptAuditStore,
+)
 from app.database.database import DATABASE_PATH
 
 
@@ -39,13 +46,28 @@ class SQLiteTaskQueueStore:
         database_path: str | Path = DATABASE_PATH,
         *,
         clock: Callable[[], datetime] | None = None,
+        audit_store: SQLiteAttemptAuditStore | None = None,
         initialize: bool = True,
     ) -> None:
         self.database_path = str(database_path)
         self._clock = clock or utc_datetime
+        self._audit = (
+            audit_store
+            if audit_store is not None
+            else SQLiteAttemptAuditStore(
+                self.database_path,
+                initialize=initialize,
+            )
+        )
 
         if initialize:
             self.initialize()
+
+    @property
+    def audit_store(self) -> SQLiteAttemptAuditStore:
+        """Return the audit store used by this queue."""
+
+        return self._audit
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(
@@ -67,6 +89,8 @@ class SQLiteTaskQueueStore:
             parents=True,
             exist_ok=True,
         )
+
+        self._audit.initialize()
 
         with self._connect() as connection:
             connection.execute("PRAGMA journal_mode = WAL")
@@ -146,41 +170,83 @@ class SQLiteTaskQueueStore:
             now + timedelta(seconds=delay_seconds)
         )
 
+        connection = self._connect()
+
         try:
-            with self._connect() as connection:
-                connection.execute(
-                    f"""
-                    INSERT INTO {QUEUE_TABLE} (
-                        task_id,
-                        owner_id,
-                        status,
-                        attempts,
-                        max_attempts,
-                        available_at,
-                        lease_expires_at,
-                        worker_id,
-                        last_error,
-                        created_at,
-                        updated_at
-                    )
-                    VALUES (?, ?, 'queued', 0, ?, ?, NULL, NULL, NULL, ?, ?)
-                    """,
-                    (
-                        task_id,
-                        owner_id,
-                        max_attempts,
-                        available_at.isoformat(),
-                        now.isoformat(),
-                        now.isoformat(),
-                    ),
+            connection.execute("BEGIN IMMEDIATE")
+
+            connection.execute(
+                f"""
+                INSERT INTO {QUEUE_TABLE} (
+                    task_id,
+                    owner_id,
+                    status,
+                    attempts,
+                    max_attempts,
+                    available_at,
+                    lease_expires_at,
+                    worker_id,
+                    last_error,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, 'queued', 0, ?, ?, NULL, NULL, NULL, ?, ?)
+                """,
+                (
+                    task_id,
+                    owner_id,
+                    max_attempts,
+                    available_at.isoformat(),
+                    now.isoformat(),
+                    now.isoformat(),
+                ),
+            )
+
+            self._audit.append(
+                task_id=task_id,
+                attempt=0,
+                event_type="enqueued",
+                queue_status="queued",
+                message="Task added to the durable queue.",
+                metadata={
+                    "owner_id": owner_id,
+                    "max_attempts": max_attempts,
+                    "delay_seconds": delay_seconds,
+                    "available_at": available_at.isoformat(),
+                },
+                created_at=now.isoformat(),
+                connection=connection,
+            )
+
+            created = self._select_task(
+                connection,
+                task_id,
+            )
+
+            connection.commit()
+
+            result = self._row_to_dict(created)
+
+            if result is None:
+                raise RuntimeError(
+                    "Enqueued queue record could not be loaded."
                 )
 
+            return result
+
         except sqlite3.IntegrityError as exc:
+            connection.rollback()
+
             raise ValueError(
                 f"Task is already queued: {task_id}"
             ) from exc
 
-        return self.require(task_id)
+        except Exception:
+            connection.rollback()
+            raise
+
+        finally:
+            connection.close()
 
     def claim_next(
         self,
@@ -216,33 +282,76 @@ class SQLiteTaskQueueStore:
         try:
             connection.execute("BEGIN IMMEDIATE")
 
-            connection.execute(
+            exhausted_rows = connection.execute(
                 f"""
-                UPDATE {QUEUE_TABLE}
-                SET
-                    status = 'failed',
-                    last_error = COALESCE(
-                        last_error,
-                        'Maximum attempts reached after worker lease expiry.'
-                    ),
-                    worker_id = NULL,
-                    lease_expires_at = NULL,
-                    updated_at = ?
+                SELECT *
+                FROM {QUEUE_TABLE}
                 WHERE
                     status = 'claimed'
                     AND lease_expires_at IS NOT NULL
                     AND lease_expires_at <= ?
                     AND attempts >= max_attempts
+                ORDER BY created_at ASC
                 """,
-                (
-                    now_text,
-                    now_text,
-                ),
-            )
+                (now_text,),
+            ).fetchall()
+
+            for exhausted in exhausted_rows:
+                error = (
+                    exhausted["last_error"]
+                    or (
+                        "Maximum attempts reached after "
+                        "worker lease expiry."
+                    )
+                )
+
+                connection.execute(
+                    f"""
+                    UPDATE {QUEUE_TABLE}
+                    SET
+                        status = 'failed',
+                        last_error = ?,
+                        worker_id = NULL,
+                        lease_expires_at = NULL,
+                        updated_at = ?
+                    WHERE
+                        task_id = ?
+                        AND status = 'claimed'
+                    """,
+                    (
+                        error,
+                        now_text,
+                        exhausted["task_id"],
+                    ),
+                )
+
+                self._audit.append(
+                    task_id=exhausted["task_id"],
+                    attempt=int(exhausted["attempts"]),
+                    event_type="failed",
+                    queue_status="failed",
+                    worker_id=exhausted["worker_id"],
+                    message=(
+                        "Expired worker lease exhausted "
+                        "the queue attempt cycle."
+                    ),
+                    error=error,
+                    metadata={
+                        "reason": "lease_expired",
+                        "max_attempts": int(
+                            exhausted["max_attempts"]
+                        ),
+                        "lease_expires_at": exhausted[
+                            "lease_expires_at"
+                        ],
+                    },
+                    created_at=now_text,
+                    connection=connection,
+                )
 
             row = connection.execute(
                 f"""
-                SELECT task_id
+                SELECT *
                 FROM {QUEUE_TABLE}
                 WHERE
                     (
@@ -270,6 +379,8 @@ class SQLiteTaskQueueStore:
                 return None
 
             task_id = row["task_id"]
+            previous_status = row["status"]
+            previous_worker_id = row["worker_id"]
 
             connection.execute(
                 f"""
@@ -290,14 +401,35 @@ class SQLiteTaskQueueStore:
                 ),
             )
 
-            claimed = connection.execute(
-                f"""
-                SELECT *
-                FROM {QUEUE_TABLE}
-                WHERE task_id = ?
-                """,
-                (task_id,),
-            ).fetchone()
+            claimed = self._select_task(
+                connection,
+                task_id,
+            )
+
+            if claimed is None:
+                raise RuntimeError(
+                    "Claimed queue record could not be loaded."
+                )
+
+            self._audit.append(
+                task_id=task_id,
+                attempt=int(claimed["attempts"]),
+                event_type="claimed",
+                queue_status="claimed",
+                worker_id=worker_id,
+                message="Task claimed by durable worker.",
+                metadata={
+                    "lease_seconds": lease_seconds,
+                    "lease_expires_at": lease_expires_at,
+                    "previous_status": previous_status,
+                    "previous_worker_id": previous_worker_id,
+                    "recovered_expired_lease": (
+                        previous_status == "claimed"
+                    ),
+                },
+                created_at=now_text,
+                connection=connection,
+            )
 
             connection.commit()
 
@@ -326,8 +458,21 @@ class SQLiteTaskQueueStore:
         )
 
         now = self._now().isoformat()
+        connection = self._connect()
 
-        with self._connect() as connection:
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+
+            current = self._select_task(
+                connection,
+                task_id,
+            )
+
+            if current is None:
+                raise KeyError(
+                    f"Queued task was not found: {task_id}"
+                )
+
             cursor = connection.execute(
                 f"""
                 UPDATE {QUEUE_TABLE}
@@ -354,7 +499,39 @@ class SQLiteTaskQueueStore:
                     "The task is not claimed by this worker."
                 )
 
-        return self.require(task_id)
+            self._audit.append(
+                task_id=task_id,
+                attempt=int(current["attempts"]),
+                event_type="completed",
+                queue_status="completed",
+                worker_id=worker_id,
+                message="Durable queue delivery completed.",
+                created_at=now,
+                connection=connection,
+            )
+
+            updated = self._select_task(
+                connection,
+                task_id,
+            )
+
+            connection.commit()
+
+            result = self._row_to_dict(updated)
+
+            if result is None:
+                raise RuntimeError(
+                    "Completed queue record could not be loaded."
+                )
+
+            return result
+
+        except Exception:
+            connection.rollback()
+            raise
+
+        finally:
+            connection.close()
 
     def fail(
         self,
@@ -382,19 +559,16 @@ class SQLiteTaskQueueStore:
         )
 
         now = self._now()
+        now_text = now.isoformat()
         connection = self._connect()
 
         try:
             connection.execute("BEGIN IMMEDIATE")
 
-            row = connection.execute(
-                f"""
-                SELECT *
-                FROM {QUEUE_TABLE}
-                WHERE task_id = ?
-                """,
-                (task_id,),
-            ).fetchone()
+            row = self._select_task(
+                connection,
+                task_id,
+            )
 
             if row is None:
                 raise KeyError(
@@ -415,6 +589,11 @@ class SQLiteTaskQueueStore:
 
             if should_retry:
                 status = "queued"
+                event_type = "retry_scheduled"
+                message = (
+                    "Queue delivery failed; another "
+                    "automatic attempt was scheduled."
+                )
 
                 available_at = (
                     now
@@ -425,6 +604,11 @@ class SQLiteTaskQueueStore:
 
             else:
                 status = "failed"
+                event_type = "failed"
+                message = (
+                    "Queue delivery failed and the "
+                    "attempt cycle was exhausted."
+                )
                 available_at = row["available_at"]
 
             connection.execute(
@@ -443,23 +627,47 @@ class SQLiteTaskQueueStore:
                     status,
                     available_at,
                     error,
-                    now.isoformat(),
+                    now_text,
                     task_id,
                 ),
             )
 
-            updated = connection.execute(
-                f"""
-                SELECT *
-                FROM {QUEUE_TABLE}
-                WHERE task_id = ?
-                """,
-                (task_id,),
-            ).fetchone()
+            self._audit.append(
+                task_id=task_id,
+                attempt=int(row["attempts"]),
+                event_type=event_type,
+                queue_status=status,
+                worker_id=worker_id,
+                message=message,
+                error=error,
+                metadata={
+                    "retry_delay_seconds": (
+                        retry_delay_seconds
+                    ),
+                    "max_attempts": int(
+                        row["max_attempts"]
+                    ),
+                    "available_at": available_at,
+                },
+                created_at=now_text,
+                connection=connection,
+            )
+
+            updated = self._select_task(
+                connection,
+                task_id,
+            )
 
             connection.commit()
 
-            return self._row_to_dict(updated)
+            result = self._row_to_dict(updated)
+
+            if result is None:
+                raise RuntimeError(
+                    "Failed queue record could not be loaded."
+                )
+
+            return result
 
         except Exception:
             connection.rollback()
@@ -467,7 +675,6 @@ class SQLiteTaskQueueStore:
 
         finally:
             connection.close()
-
 
     def retry_failed(
         self,
@@ -479,10 +686,10 @@ class SQLiteTaskQueueStore:
         """
         Return a failed queue job to the executable queue.
 
-        Only queue records whose current status is ``failed`` can be
+        Only queue records whose current status is failed can be
         retried. The attempt counter is reset for a new retry cycle,
-        while ``last_error`` remains available for diagnostics until
-        the job succeeds or fails again.
+        while last_error remains available for diagnostics until the
+        job succeeds or fails again.
         """
 
         task_id = self._validate_text(
@@ -499,6 +706,7 @@ class SQLiteTaskQueueStore:
         )
 
         now = self._now()
+        now_text = now.isoformat()
 
         available_at = (
             now
@@ -510,18 +718,12 @@ class SQLiteTaskQueueStore:
         connection = self._connect()
 
         try:
-            connection.execute(
-                "BEGIN IMMEDIATE"
-            )
+            connection.execute("BEGIN IMMEDIATE")
 
-            row = connection.execute(
-                f"""
-                SELECT *
-                FROM {QUEUE_TABLE}
-                WHERE task_id = ?
-                """,
-                (task_id,),
-            ).fetchone()
+            row = self._select_task(
+                connection,
+                task_id,
+            )
 
             if row is None:
                 raise KeyError(
@@ -554,7 +756,7 @@ class SQLiteTaskQueueStore:
                 (
                     max_attempts,
                     available_at,
-                    now.isoformat(),
+                    now_text,
                     task_id,
                 ),
             )
@@ -565,14 +767,35 @@ class SQLiteTaskQueueStore:
                     "it could be retried."
                 )
 
-            updated = connection.execute(
-                f"""
-                SELECT *
-                FROM {QUEUE_TABLE}
-                WHERE task_id = ?
-                """,
-                (task_id,),
-            ).fetchone()
+            self._audit.append(
+                task_id=task_id,
+                attempt=0,
+                event_type="manually_retried",
+                queue_status="queued",
+                message=(
+                    "Failed queue job started a new "
+                    "manual retry cycle."
+                ),
+                error=row["last_error"],
+                metadata={
+                    "previous_attempts": int(
+                        row["attempts"]
+                    ),
+                    "previous_max_attempts": int(
+                        row["max_attempts"]
+                    ),
+                    "new_max_attempts": max_attempts,
+                    "delay_seconds": delay_seconds,
+                    "available_at": available_at,
+                },
+                created_at=now_text,
+                connection=connection,
+            )
+
+            updated = self._select_task(
+                connection,
+                task_id,
+            )
 
             connection.commit()
 
@@ -618,6 +841,16 @@ class SQLiteTaskQueueStore:
         try:
             connection.execute("BEGIN IMMEDIATE")
 
+            row = self._select_task(
+                connection,
+                task_id,
+            )
+
+            if row is None:
+                raise KeyError(
+                    f"Queued task was not found: {task_id}"
+                )
+
             cursor = connection.execute(
                 f"""
                 UPDATE {QUEUE_TABLE}
@@ -637,34 +870,33 @@ class SQLiteTaskQueueStore:
             )
 
             if cursor.rowcount == 0:
-                row = connection.execute(
-                    f"""
-                    SELECT *
-                    FROM {QUEUE_TABLE}
-                    WHERE task_id = ?
-                    """,
-                    (task_id,),
-                ).fetchone()
-
-                if row is None:
-                    raise KeyError(
-                        f"Queued task was not found: {task_id}"
-                    )
-
                 raise ValueError(
                     "Task cannot be safely cancelled "
                     "from queue status "
                     f"{row['status']}."
                 )
 
-            updated = connection.execute(
-                f"""
-                SELECT *
-                FROM {QUEUE_TABLE}
-                WHERE task_id = ?
-                """,
-                (task_id,),
-            ).fetchone()
+            self._audit.append(
+                task_id=task_id,
+                attempt=int(row["attempts"]),
+                event_type="cancelled",
+                queue_status="cancelled",
+                message=(
+                    "Queued task cancelled before "
+                    "worker execution."
+                ),
+                metadata={
+                    "previous_status": row["status"],
+                    "cancellation_mode": "safe_queued",
+                },
+                created_at=now,
+                connection=connection,
+            )
+
+            updated = self._select_task(
+                connection,
+                task_id,
+            )
 
             connection.commit()
 
@@ -701,6 +933,16 @@ class SQLiteTaskQueueStore:
         try:
             connection.execute("BEGIN IMMEDIATE")
 
+            row = self._select_task(
+                connection,
+                task_id,
+            )
+
+            if row is None:
+                raise KeyError(
+                    f"Queued task was not found: {task_id}"
+                )
+
             cursor = connection.execute(
                 f"""
                 UPDATE {QUEUE_TABLE}
@@ -720,33 +962,33 @@ class SQLiteTaskQueueStore:
             )
 
             if cursor.rowcount == 0:
-                row = connection.execute(
-                    f"""
-                    SELECT *
-                    FROM {QUEUE_TABLE}
-                    WHERE task_id = ?
-                    """,
-                    (task_id,),
-                ).fetchone()
-
-                if row is None:
-                    raise KeyError(
-                        f"Queued task was not found: {task_id}"
-                    )
-
                 raise ValueError(
                     "Task cannot be cancelled from queue "
                     f"status {row['status']}."
                 )
 
-            updated = connection.execute(
-                f"""
-                SELECT *
-                FROM {QUEUE_TABLE}
-                WHERE task_id = ?
-                """,
-                (task_id,),
-            ).fetchone()
+            self._audit.append(
+                task_id=task_id,
+                attempt=int(row["attempts"]),
+                event_type="cancelled",
+                queue_status="cancelled",
+                worker_id=row["worker_id"],
+                message=(
+                    "Queue job cancelled by an internal "
+                    "runtime operation."
+                ),
+                metadata={
+                    "previous_status": row["status"],
+                    "cancellation_mode": "internal",
+                },
+                created_at=now,
+                connection=connection,
+            )
+
+            updated = self._select_task(
+                connection,
+                task_id,
+            )
 
             connection.commit()
 
@@ -776,14 +1018,10 @@ class SQLiteTaskQueueStore:
         )
 
         with self._connect() as connection:
-            row = connection.execute(
-                f"""
-                SELECT *
-                FROM {QUEUE_TABLE}
-                WHERE task_id = ?
-                """,
-                (task_id,),
-            ).fetchone()
+            row = self._select_task(
+                connection,
+                task_id,
+            )
 
         return self._row_to_dict(row)
 
@@ -852,6 +1090,12 @@ class SQLiteTaskQueueStore:
         ]
 
     def clear(self) -> None:
+        """
+        Clear queue records only.
+
+        Attempt-audit rows are append-only and intentionally preserved.
+        """
+
         with self._connect() as connection:
             connection.execute(
                 f"DELETE FROM {QUEUE_TABLE}"
@@ -871,6 +1115,20 @@ class SQLiteTaskQueueStore:
             )
 
         return current.astimezone(timezone.utc)
+
+    @staticmethod
+    def _select_task(
+        connection: sqlite3.Connection,
+        task_id: str,
+    ) -> sqlite3.Row | None:
+        return connection.execute(
+            f"""
+            SELECT *
+            FROM {QUEUE_TABLE}
+            WHERE task_id = ?
+            """,
+            (task_id,),
+        ).fetchone()
 
     @staticmethod
     def _row_to_dict(
