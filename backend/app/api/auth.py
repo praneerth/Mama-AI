@@ -1,5 +1,5 @@
 """
-Bearer-token authentication foundation for Mama AI.
+Bearer-token authentication and single-owner authorization for Mama AI.
 
 The authenticated owner identity is derived from trusted server
 configuration, never from an untrusted request body or query parameter.
@@ -70,7 +70,15 @@ def _authentication_error(
     )
 
 
-def _configured_owner_id() -> str:
+def configured_owner_id() -> str:
+    """
+    Return the owner bound to the configured authentication token.
+
+    Mama AI currently uses one opaque token mapped to one local owner.
+    Multi-user identity storage can replace this mapping later without
+    changing protected endpoint behavior.
+    """
+
     owner_id = str(
         settings.AUTH_OWNER_ID
     ).strip()
@@ -116,9 +124,99 @@ def _token_fingerprint(
         token.encode("utf-8")
     ).hexdigest()
 
-    # A short fingerprint supports diagnostics without exposing the
-    # credential itself.
     return digest[:12]
+
+
+def resolve_requested_owner(
+    requested_owner_id: str | None,
+) -> str:
+    """
+    Resolve an optional legacy owner field against the principal owner.
+
+    Legacy clients may still submit owner_id. It is never trusted:
+    omitted values resolve to the authenticated owner and mismatched
+    values are rejected.
+    """
+
+    owner_id = configured_owner_id()
+
+    if requested_owner_id is None:
+        return owner_id
+
+    if not isinstance(
+        requested_owner_id,
+        str,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Owner ID must be text.",
+        )
+
+    requested_owner_id = (
+        requested_owner_id.strip()
+    )
+
+    if not requested_owner_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Owner ID cannot be empty.",
+        )
+
+    if not secrets.compare_digest(
+        requested_owner_id,
+        owner_id,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "The authenticated principal cannot "
+                "act for another owner."
+            ),
+        )
+
+    return owner_id
+
+
+def require_resource_owner(
+    resource_owner_id: str | None,
+    *,
+    resource_name: str = "Resource",
+) -> str:
+    """
+    Require a stored resource to belong to the authenticated owner.
+
+    A generic 404 is returned on mismatch to avoid confirming that
+    another owner's resource exists.
+    """
+
+    owner_id = configured_owner_id()
+
+    if not isinstance(
+        resource_owner_id,
+        str,
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail=f"{resource_name} was not found.",
+        )
+
+    resource_owner_id = (
+        resource_owner_id.strip()
+    )
+
+    if (
+        not resource_owner_id
+        or not secrets.compare_digest(
+            resource_owner_id,
+            owner_id,
+        )
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail=f"{resource_name} was not found.",
+        )
+
+    return owner_id
 
 
 def require_principal(
@@ -136,7 +234,7 @@ def require_principal(
     authentication method.
     """
 
-    owner_id = _configured_owner_id()
+    owner_id = configured_owner_id()
 
     if not bool(settings.AUTH_ENABLED):
         return AuthenticatedPrincipal(
@@ -208,6 +306,9 @@ __all__ = [
     "AuthenticatedPrincipal",
     "authenticated_identity",
     "bearer_scheme",
+    "configured_owner_id",
     "require_principal",
+    "require_resource_owner",
+    "resolve_requested_owner",
     "router",
 ]

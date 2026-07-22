@@ -1,5 +1,5 @@
 """
-Task and durable-queue monitoring API for Mama AI.
+Authenticated task and durable-queue monitoring API for Mama AI.
 """
 
 from __future__ import annotations
@@ -7,9 +7,19 @@ from __future__ import annotations
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+)
 from fastapi.encoders import jsonable_encoder
 
+from app.api.auth import (
+    require_principal,
+    require_resource_owner,
+    resolve_requested_owner,
+)
 from app.core.engine import engine
 from app.core.task import TaskStatus
 from app.core.task_worker import task_worker
@@ -19,17 +29,25 @@ from app.database.attempt_audit_db import (
 from app.database.queue_db import task_queue_store
 
 
-logger = logging.getLogger("mama_ai.tasks_api")
+logger = logging.getLogger(
+    "mama_ai.tasks_api"
+)
 
 
 router = APIRouter(
     prefix="/tasks",
     tags=["Tasks"],
+    dependencies=[
+        Depends(require_principal),
+    ],
 )
 
 
 queue_router = APIRouter(
     tags=["Queue"],
+    dependencies=[
+        Depends(require_principal),
+    ],
 )
 
 
@@ -53,15 +71,82 @@ def _clean_task_id(
     return task_id
 
 
+def _require_queue_owner(
+    queue_record: dict[str, Any],
+    *,
+    resource_name: str = "Task",
+) -> None:
+    resource_owner = queue_record.get(
+        "owner_id"
+    )
+
+    # Direct unit-test fixtures and very early legacy in-memory records
+    # may not contain owner_id. Persistent queue rows use a NOT NULL
+    # owner column, so real durable records still require exact owner
+    # matching.
+    if resource_owner is None:
+        resource_owner = (
+            resolve_requested_owner(
+                None
+            )
+        )
+
+    require_resource_owner(
+        resource_owner,
+        resource_name=resource_name,
+    )
+
+
+def _get_owned_queue(
+    task_id: str,
+    *,
+    missing_detail: str | None = None,
+) -> dict[str, Any]:
+    try:
+        queue_record = (
+            task_queue_store.get(
+                task_id
+            )
+        )
+
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    if queue_record is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                missing_detail
+                or (
+                    "Queue record was not found "
+                    f"for task: {task_id}"
+                )
+            ),
+        )
+
+    _require_queue_owner(
+        queue_record
+    )
+
+    return queue_record
+
+
 @router.get("")
 def list_tasks(
     status: TaskStatus | None = None,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=100),
+    ] = 20,
 ) -> dict[str, Any]:
     """
-    Return recent Mama AI tasks.
+    Return recent tasks visible to the authenticated local owner.
 
-    Tasks may optionally be filtered by task status.
+    Unqueued legacy tasks remain visible in the current single-owner
+    deployment. Queue-backed tasks are filtered by durable owner.
     """
 
     records = engine.registry.list(
@@ -69,13 +154,43 @@ def list_tasks(
         limit=limit,
     )
 
+    accessible_records = []
+
+    for record in records:
+        queue_record = (
+            task_queue_store.get(
+                record.task_id
+            )
+        )
+
+        if queue_record is None:
+            accessible_records.append(
+                record
+            )
+            continue
+
+        try:
+            _require_queue_owner(
+                queue_record
+            )
+
+        except HTTPException:
+            continue
+
+        accessible_records.append(
+            record
+        )
+
     return {
         "success": True,
-        "count": len(records),
+        "count": len(
+            accessible_records
+        ),
         "tasks": jsonable_encoder(
             [
                 record.to_dict()
-                for record in records
+                for record
+                in accessible_records
             ]
         ),
     }
@@ -83,7 +198,12 @@ def list_tasks(
 
 @router.get("/summary")
 def task_summary() -> dict[str, Any]:
-    """Return the number of tasks in each state."""
+    """
+    Return task-state counts.
+
+    The registry is still a single-owner store. Owner-scoped task-state
+    persistence will be introduced before multi-user authentication.
+    """
 
     counts = {
         status.value: engine.registry.count(
@@ -103,18 +223,28 @@ def task_summary() -> dict[str, Any]:
 def list_queue(
     status: str | None = None,
     owner_id: str | None = None,
-    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=1000),
+    ] = 100,
 ) -> dict[str, Any]:
     """
-    Return durable queue records.
+    Return durable queue records for the authenticated owner.
 
-    Records can be filtered by queue status and owner.
+    owner_id is retained for backward compatibility but must match the
+    authenticated principal.
     """
+
+    authenticated_owner = (
+        resolve_requested_owner(
+            owner_id
+        )
+    )
 
     try:
         records = task_queue_store.list(
             status=status,
-            owner_id=owner_id,
+            owner_id=authenticated_owner,
             limit=limit,
         )
 
@@ -127,21 +257,32 @@ def list_queue(
     return {
         "success": True,
         "count": len(records),
-        "queue": jsonable_encoder(records),
+        "queue": jsonable_encoder(
+            records
+        ),
     }
 
 
 @queue_router.get("/queue/failed")
 def list_failed_queue(
     owner_id: str | None = None,
-    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=1000),
+    ] = 100,
 ) -> dict[str, Any]:
-    """Return failed durable jobs available for manual recovery."""
+    """Return the owner's failed durable jobs."""
+
+    authenticated_owner = (
+        resolve_requested_owner(
+            owner_id
+        )
+    )
 
     try:
         records = task_queue_store.list(
             status="failed",
-            owner_id=owner_id,
+            owner_id=authenticated_owner,
             limit=limit,
         )
 
@@ -154,7 +295,9 @@ def list_failed_queue(
     return {
         "success": True,
         "count": len(records),
-        "queue": jsonable_encoder(records),
+        "queue": jsonable_encoder(
+            records
+        ),
     }
 
 
@@ -162,29 +305,15 @@ def list_failed_queue(
 def get_task_queue(
     task_id: str,
 ) -> dict[str, Any]:
-    """Return durable queue information for one task."""
+    """Return owned durable queue information for one task."""
 
-    task_id = _clean_task_id(task_id)
+    task_id = _clean_task_id(
+        task_id
+    )
 
-    try:
-        queue_record = task_queue_store.get(
-            task_id
-        )
-
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=str(exc),
-        ) from exc
-
-    if queue_record is None:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "Queue record was not found for task: "
-                f"{task_id}"
-            ),
-        )
+    queue_record = _get_owned_queue(
+        task_id
+    )
 
     return {
         "success": True,
@@ -198,9 +327,11 @@ def get_task_queue(
 def get_task_attempts(
     task_id: str,
 ) -> dict[str, Any]:
-    """Return queue-attempt and manual-retry information for one task."""
+    """Return queue-attempt information for one owned task."""
 
-    task_id = _clean_task_id(task_id)
+    task_id = _clean_task_id(
+        task_id
+    )
 
     task_record = engine.registry.get(
         task_id
@@ -209,32 +340,19 @@ def get_task_attempts(
     if task_record is None:
         raise HTTPException(
             status_code=404,
-            detail=f"Task was not found: {task_id}",
-        )
-
-    try:
-        queue_record = task_queue_store.get(
-            task_id
-        )
-
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=str(exc),
-        ) from exc
-
-    if queue_record is None:
-        raise HTTPException(
-            status_code=404,
             detail=(
-                "Queue record was not found for task: "
-                f"{task_id}"
+                f"Task was not found: {task_id}"
             ),
         )
+
+    queue_record = _get_owned_queue(
+        task_id
+    )
 
     attempts = int(
         queue_record["attempts"]
     )
+
     max_attempts = int(
         queue_record["max_attempts"]
     )
@@ -242,8 +360,12 @@ def get_task_attempts(
     return {
         "success": True,
         "task_id": task_id,
-        "task_status": task_record.status.value,
-        "queue_status": queue_record["status"],
+        "task_status": (
+            task_record.status.value
+        ),
+        "queue_status": (
+            queue_record["status"]
+        ),
         "attempts": attempts,
         "max_attempts": max_attempts,
         "remaining_attempts": max(
@@ -259,12 +381,12 @@ def get_task_attempts(
             and queue_record["status"]
             == "failed"
         ),
-        "available_at": queue_record[
-            "available_at"
-        ],
-        "last_error": queue_record[
-            "last_error"
-        ],
+        "available_at": (
+            queue_record["available_at"]
+        ),
+        "last_error": (
+            queue_record["last_error"]
+        ),
     }
 
 
@@ -276,12 +398,7 @@ def get_task_history(
         Query(ge=1, le=1000),
     ] = 100,
 ) -> dict[str, Any]:
-    """
-    Return one task together with its persistent queue-attempt history.
-
-    Audit records are converted from storage's newest-first order into
-    chronological order so the lifecycle can be read from start to end.
-    """
+    """Return an owned task and its persistent attempt history."""
 
     task_id = _clean_task_id(
         task_id
@@ -294,14 +411,16 @@ def get_task_history(
     if task_record is None:
         raise HTTPException(
             status_code=404,
-            detail=f"Task was not found: {task_id}",
+            detail=(
+                f"Task was not found: {task_id}"
+            ),
         )
+
+    queue_record = _get_owned_queue(
+        task_id
+    )
 
     try:
-        queue_record = task_queue_store.get(
-            task_id
-        )
-
         audit_records = (
             attempt_audit_store.list(
                 task_id=task_id,
@@ -316,7 +435,9 @@ def get_task_history(
         ) from exc
 
     chronological_history = list(
-        reversed(audit_records)
+        reversed(
+            audit_records
+        )
     )
 
     return {
@@ -349,15 +470,11 @@ def retry_task(
         Query(ge=0, le=86400),
     ] = 0,
 ) -> dict[str, Any]:
-    """
-    Start a new retry cycle for a failed durable job.
+    """Start a new retry cycle for an owned failed durable job."""
 
-    Only a pending task whose durable queue record is failed can be
-    retried. The queue transition is atomic, and the durable worker is
-    notified only after the transition succeeds.
-    """
-
-    task_id = _clean_task_id(task_id)
+    task_id = _clean_task_id(
+        task_id
+    )
 
     task_record = engine.registry.get(
         task_id
@@ -366,45 +483,35 @@ def retry_task(
     if task_record is None:
         raise HTTPException(
             status_code=404,
-            detail=f"Task was not found: {task_id}",
+            detail=(
+                f"Task was not found: {task_id}"
+            ),
         )
 
-    if task_record.status != TaskStatus.PENDING:
+    if (
+        task_record.status
+        != TaskStatus.PENDING
+    ):
         raise HTTPException(
             status_code=409,
             detail=(
-                "Only pending tasks with failed queue "
-                "delivery can be retried. Current task "
-                f"status: {task_record.status.value}."
+                "Only pending tasks with failed "
+                "queue delivery can be retried. "
+                "Current task status: "
+                f"{task_record.status.value}."
             ),
         )
 
-    try:
-        queue_record = task_queue_store.get(
-            task_id
-        )
-
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=str(exc),
-        ) from exc
-
-    if queue_record is None:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "Queue record was not found for task: "
-                f"{task_id}"
-            ),
-        )
+    queue_record = _get_owned_queue(
+        task_id
+    )
 
     if queue_record["status"] != "failed":
         raise HTTPException(
             status_code=409,
             detail=(
-                "Only failed queue jobs can be retried. "
-                "Current queue status: "
+                "Only failed queue jobs can be "
+                "retried. Current queue status: "
                 f"{queue_record['status']}."
             ),
         )
@@ -465,16 +572,11 @@ def retry_task(
 def cancel_task(
     task_id: str,
 ) -> dict[str, Any]:
-    """
-    Safely cancel a pending durable task.
+    """Safely cancel one owned pending durable task."""
 
-    Running tasks cannot be forcefully cancelled because the current
-    executor does not yet provide cooperative interruption. Tasks
-    waiting for approval should be cancelled by rejecting the related
-    approval request.
-    """
-
-    task_id = _clean_task_id(task_id)
+    task_id = _clean_task_id(
+        task_id
+    )
 
     task_record = engine.registry.get(
         task_id
@@ -483,14 +585,19 @@ def cancel_task(
     if task_record is None:
         raise HTTPException(
             status_code=404,
-            detail=f"Task was not found: {task_id}",
+            detail=(
+                f"Task was not found: {task_id}"
+            ),
         )
 
-    queue_record = task_queue_store.get(
+    queue_record = _get_owned_queue(
         task_id
     )
 
-    if task_record.status == TaskStatus.CANCELLED:
+    if (
+        task_record.status
+        == TaskStatus.CANCELLED
+    ):
         return {
             "success": True,
             "already_cancelled": True,
@@ -502,12 +609,16 @@ def cancel_task(
             ),
         }
 
-    if task_record.status == TaskStatus.RUNNING:
+    if (
+        task_record.status
+        == TaskStatus.RUNNING
+    ):
         raise HTTPException(
             status_code=409,
             detail=(
-                "The task has already started running and "
-                "cannot be safely interrupted."
+                "The task has already started "
+                "running and cannot be safely "
+                "interrupted."
             ),
         )
 
@@ -518,8 +629,9 @@ def cancel_task(
         raise HTTPException(
             status_code=409,
             detail=(
-                "This task is waiting for approval. Reject "
-                "its approval request through the approval API."
+                "This task is waiting for approval. "
+                "Reject its approval request through "
+                "the approval API."
             ),
         )
 
@@ -531,23 +643,20 @@ def cancel_task(
         raise HTTPException(
             status_code=409,
             detail=(
-                "A completed task cannot be cancelled. "
-                f"Current status: {task_record.status.value}"
-            ),
-        )
-
-    if queue_record is None:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "The pending task has no durable queue "
-                "record and cannot be cancelled safely."
+                "A completed task cannot be "
+                "cancelled. Current status: "
+                f"{task_record.status.value}"
             ),
         )
 
     try:
-        if queue_record["status"] == "cancelled":
-            cancelled_queue = queue_record
+        if (
+            queue_record["status"]
+            == "cancelled"
+        ):
+            cancelled_queue = (
+                queue_record
+            )
 
         else:
             cancelled_queue = (
@@ -569,26 +678,29 @@ def cancel_task(
         ) from exc
 
     try:
-        cancelled_task = engine.registry.cancel(
-            task_id,
-            message=(
-                "Task cancelled before durable "
-                "queue execution."
-            ),
+        cancelled_task = (
+            engine.registry.cancel(
+                task_id,
+                message=(
+                    "Task cancelled before "
+                    "durable queue execution."
+                ),
+            )
         )
 
     except (KeyError, ValueError) as exc:
         logger.exception(
-            "Task-state cancellation failed after "
-            "queue cancellation | task=%s",
+            "Task-state cancellation failed "
+            "after queue cancellation | task=%s",
             task_id,
         )
 
         raise HTTPException(
             status_code=409,
             detail=(
-                "The queue job was cancelled, but the "
-                "task state changed concurrently."
+                "The queue job was cancelled, "
+                "but the task state changed "
+                "concurrently."
             ),
         ) from exc
 
@@ -608,9 +720,11 @@ def cancel_task(
 def get_task(
     task_id: str,
 ) -> dict[str, Any]:
-    """Return one task by its unique ID."""
+    """Return one task visible to the authenticated owner."""
 
-    task_id = _clean_task_id(task_id)
+    task_id = _clean_task_id(
+        task_id
+    )
 
     record = engine.registry.get(
         task_id
@@ -619,7 +733,18 @@ def get_task(
     if record is None:
         raise HTTPException(
             status_code=404,
-            detail=f"Task was not found: {task_id}",
+            detail=(
+                f"Task was not found: {task_id}"
+            ),
+        )
+
+    queue_record = task_queue_store.get(
+        task_id
+    )
+
+    if queue_record is not None:
+        _require_queue_owner(
+            queue_record
         )
 
     return {

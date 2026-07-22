@@ -1,5 +1,5 @@
 """
-Mama AI chat and automation API.
+Authenticated Mama AI chat and automation API.
 
 General conversation is processed immediately. Automation requests are
 registered persistently and delivered through the durable task queue.
@@ -9,9 +9,17 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+)
 from pydantic import BaseModel
 
+from app.api.auth import (
+    configured_owner_id,
+    require_principal,
+)
 from app.core.engine import engine
 from app.core.risk_policy import risk_policy
 from app.core.task import TaskRequest, TaskStatus
@@ -20,9 +28,16 @@ from app.database.queue_db import task_queue_store
 from app.services.ai_pipeline import process_request
 
 
-router = APIRouter(tags=["Chat"])
+router = APIRouter(
+    tags=["Chat"],
+    dependencies=[
+        Depends(require_principal),
+    ],
+)
 
-logger = logging.getLogger("mama_ai.chat_api")
+logger = logging.getLogger(
+    "mama_ai.chat_api"
+)
 
 
 AUTOMATION_INTENTS = {
@@ -37,12 +52,14 @@ class ChatRequest(BaseModel):
 
 
 @router.post("/chat")
-def chat(payload: ChatRequest) -> dict:
+def chat(
+    payload: ChatRequest,
+) -> dict:
     """
     Process normal conversation or queue an automation task.
 
-    Automation tasks are saved before the worker is notified. This
-    allows queued tasks to survive backend restarts.
+    The owner identity is derived from trusted authentication
+    configuration and never from the request body.
     """
 
     user_message = payload.message.strip()
@@ -82,7 +99,7 @@ def chat(payload: ChatRequest) -> dict:
         user_message
     )
 
-    owner_id = "local-user"
+    owner_id = configured_owner_id()
 
     task_request = TaskRequest(
         command=user_message,
@@ -114,9 +131,11 @@ def chat(payload: ChatRequest) -> dict:
         ) from exc
 
     try:
-        queue_record = task_queue_store.enqueue(
-            task_request.task_id,
-            owner_id=owner_id,
+        queue_record = (
+            task_queue_store.enqueue(
+                task_request.task_id,
+                owner_id=owner_id,
+            )
         )
 
     except Exception as exc:
@@ -157,7 +176,21 @@ def chat(payload: ChatRequest) -> dict:
         ),
         "intent": intent,
         "task_id": task_request.task_id,
-        "task_status": TaskStatus.PENDING.value,
-        "queue_status": queue_record["status"],
-        "risk_level": assessment.risk_level.value,
+        "task_status": (
+            TaskStatus.PENDING.value
+        ),
+        "queue_status": (
+            queue_record["status"]
+        ),
+        "risk_level": (
+            assessment.risk_level.value
+        ),
     }
+
+
+__all__ = [
+    "AUTOMATION_INTENTS",
+    "ChatRequest",
+    "chat",
+    "router",
+]

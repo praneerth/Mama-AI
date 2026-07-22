@@ -1,15 +1,25 @@
 """
-Approval management API for sensitive Mama AI tasks.
+Authenticated approval management API for sensitive Mama AI tasks.
 """
 
 from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+)
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
+from app.api.auth import (
+    require_principal,
+    require_resource_owner,
+    resolve_requested_owner,
+)
 from app.core.approval_registry import ApprovalStatus
 from app.core.engine import engine
 from app.core.event_bus import event_bus
@@ -19,22 +29,37 @@ from app.core.task import TaskRequest, TaskStatus
 router = APIRouter(
     prefix="/approvals",
     tags=["Approvals"],
+    dependencies=[
+        Depends(require_principal),
+    ],
 )
 
 
 class ApprovalActionRequest(BaseModel):
-    owner_id: str = Field(
-        default="local-user",
+    """
+    Transitional request body.
+
+    owner_id is accepted only for backward compatibility. It must match
+    the authenticated principal and is never trusted as identity.
+    """
+
+    owner_id: str | None = Field(
+        default=None,
         min_length=1,
         max_length=128,
     )
 
 
-def _clean_text(value: str, field_name: str) -> str:
+def _clean_text(
+    value: str,
+    field_name: str,
+) -> str:
     if not isinstance(value, str):
         raise HTTPException(
             status_code=400,
-            detail=f"{field_name} must be text.",
+            detail=(
+                f"{field_name} must be text."
+            ),
         )
 
     value = value.strip()
@@ -42,13 +67,17 @@ def _clean_text(value: str, field_name: str) -> str:
     if not value:
         raise HTTPException(
             status_code=400,
-            detail=f"{field_name} cannot be empty.",
+            detail=(
+                f"{field_name} cannot be empty."
+            ),
         )
 
     return value
 
 
-def _raise_registry_error(exc: Exception) -> None:
+def _raise_registry_error(
+    exc: Exception,
+) -> None:
     if isinstance(exc, KeyError):
         raise HTTPException(
             status_code=404,
@@ -79,27 +108,44 @@ def _raise_registry_error(exc: Exception) -> None:
     ) from exc
 
 
+def _require_approval_owner(
+    approval,
+) -> str:
+    return require_resource_owner(
+        getattr(
+            approval,
+            "owner_id",
+            None,
+        ),
+        resource_name="Approval request",
+    )
+
+
 @router.get("")
 def list_approvals(
     status: ApprovalStatus | None = None,
     owner_id: str | None = None,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=100),
+    ] = 20,
 ):
     """
-    Return recent approval requests.
+    Return the authenticated owner's recent approval requests.
 
-    Raw approval tokens are never included.
+    The optional owner_id query parameter is retained only for legacy
+    clients and must match the authenticated owner.
     """
 
-    cleaned_owner = (
-        _clean_text(owner_id, "Owner ID")
-        if owner_id is not None
-        else None
+    authenticated_owner = (
+        resolve_requested_owner(
+            owner_id
+        )
     )
 
     records = engine.approvals.list(
         status=status,
-        owner_id=cleaned_owner,
+        owner_id=authenticated_owner,
     )
 
     records = records[:limit]
@@ -108,32 +154,41 @@ def list_approvals(
         "success": True,
         "count": len(records),
         "approvals": jsonable_encoder(
-            [record.to_dict() for record in records]
+            [
+                record.to_dict()
+                for record in records
+            ]
         ),
     }
 
 
 @router.get("/{approval_id}")
-def get_approval(approval_id: str):
-    """
-    Return one approval request by ID.
-    """
+def get_approval(
+    approval_id: str,
+):
+    """Return one approval owned by the authenticated principal."""
 
     approval_id = _clean_text(
         approval_id,
         "Approval ID",
     )
 
-    record = engine.approvals.get(approval_id)
+    record = engine.approvals.get(
+        approval_id
+    )
 
     if record is None:
         raise HTTPException(
             status_code=404,
             detail=(
-                f"Approval request was not found: "
+                "Approval request was not found: "
                 f"{approval_id}"
             ),
         )
+
+    _require_approval_owner(
+        record
+    )
 
     return {
         "success": True,
@@ -146,34 +201,44 @@ def get_approval(approval_id: str):
 @router.post("/{approval_id}/approve")
 def approve_and_execute(
     approval_id: str,
-    payload: ApprovalActionRequest,
+    payload: ApprovalActionRequest | None = None,
 ):
     """
     Approve a sensitive task and execute it immediately.
 
-    The generated one-time token stays inside the backend and is
-    consumed by the engine during this request.
+    Identity comes from authentication. A legacy body owner_id is
+    accepted only when it matches the authenticated owner.
     """
 
     approval_id = _clean_text(
         approval_id,
         "Approval ID",
     )
-    owner_id = _clean_text(
-        payload.owner_id,
-        "Owner ID",
+
+    owner_id = resolve_requested_owner(
+        (
+            payload.owner_id
+            if payload is not None
+            else None
+        )
     )
 
-    approval = engine.approvals.get(approval_id)
+    approval = engine.approvals.get(
+        approval_id
+    )
 
     if approval is None:
         raise HTTPException(
             status_code=404,
             detail=(
-                f"Approval request was not found: "
+                "Approval request was not found: "
                 f"{approval_id}"
             ),
         )
+
+    _require_approval_owner(
+        approval
+    )
 
     task_record = engine.registry.get(
         approval.task_id
@@ -183,7 +248,7 @@ def approve_and_execute(
         raise HTTPException(
             status_code=404,
             detail=(
-                f"Associated task was not found: "
+                "Associated task was not found: "
                 f"{approval.task_id}"
             ),
         )
@@ -195,8 +260,9 @@ def approve_and_execute(
         raise HTTPException(
             status_code=409,
             detail=(
-                "The associated task cannot be approved from "
-                f"status {task_record.status.value}."
+                "The associated task cannot be "
+                "approved from status "
+                f"{task_record.status.value}."
             ),
         )
 
@@ -205,8 +271,11 @@ def approve_and_execute(
             approval_id,
             owner_id=owner_id,
         )
+
     except Exception as exc:
-        _raise_registry_error(exc)
+        _raise_registry_error(
+            exc
+        )
 
     event_bus.publish(
         "approval.approved",
@@ -221,7 +290,9 @@ def approve_and_execute(
     task_request = TaskRequest(
         command=task_record.command,
         source=task_record.source,
-        autonomy_level=task_record.autonomy_level,
+        autonomy_level=(
+            task_record.autonomy_level
+        ),
         risk_level=task_record.risk_level,
         task_id=task_record.task_id,
         metadata={
@@ -237,8 +308,10 @@ def approve_and_execute(
         approval_token=grant.token,
     )
 
-    updated_approval = engine.approvals.require(
-        approval_id
+    updated_approval = (
+        engine.approvals.require(
+            approval_id
+        )
     )
 
     return {
@@ -255,31 +328,44 @@ def approve_and_execute(
 @router.post("/{approval_id}/reject")
 def reject_approval(
     approval_id: str,
-    payload: ApprovalActionRequest,
+    payload: ApprovalActionRequest | None = None,
 ):
     """
     Reject an approval and cancel its associated task.
+
+    Identity comes from authentication. A legacy body owner_id is
+    accepted only when it matches the authenticated owner.
     """
 
     approval_id = _clean_text(
         approval_id,
         "Approval ID",
     )
-    owner_id = _clean_text(
-        payload.owner_id,
-        "Owner ID",
+
+    owner_id = resolve_requested_owner(
+        (
+            payload.owner_id
+            if payload is not None
+            else None
+        )
     )
 
-    approval = engine.approvals.get(approval_id)
+    approval = engine.approvals.get(
+        approval_id
+    )
 
     if approval is None:
         raise HTTPException(
             status_code=404,
             detail=(
-                f"Approval request was not found: "
+                "Approval request was not found: "
                 f"{approval_id}"
             ),
         )
+
+    _require_approval_owner(
+        approval
+    )
 
     task_record = engine.registry.get(
         approval.task_id
@@ -289,7 +375,7 @@ def reject_approval(
         raise HTTPException(
             status_code=404,
             detail=(
-                f"Associated task was not found: "
+                "Associated task was not found: "
                 f"{approval.task_id}"
             ),
         )
@@ -301,8 +387,9 @@ def reject_approval(
         raise HTTPException(
             status_code=409,
             detail=(
-                "The associated task cannot be rejected from "
-                f"status {task_record.status.value}."
+                "The associated task cannot be "
+                "rejected from status "
+                f"{task_record.status.value}."
             ),
         )
 
@@ -314,10 +401,15 @@ def reject_approval(
 
         cancelled = engine.registry.cancel(
             task_record.task_id,
-            message="Task rejected by the user.",
+            message=(
+                "Task rejected by the user."
+            ),
         )
+
     except Exception as exc:
-        _raise_registry_error(exc)
+        _raise_registry_error(
+            exc
+        )
 
     event_bus.publish(
         "approval.rejected",
@@ -340,4 +432,11 @@ def reject_approval(
     }
 
 
-__all__ = ["router"]
+__all__ = [
+    "ApprovalActionRequest",
+    "approve_and_execute",
+    "get_approval",
+    "list_approvals",
+    "reject_approval",
+    "router",
+]
