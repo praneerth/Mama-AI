@@ -9,6 +9,7 @@ raw client addresses are never intentionally persisted.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
 from collections.abc import Mapping, Sequence
@@ -856,11 +857,51 @@ class SQLiteSecurityEventStore:
 security_event_store = SQLiteSecurityEventStore()
 
 
+security_audit_logger = logging.getLogger(
+    "mama_ai.security_audit"
+)
+
+
+def record_security_event_safely(
+    **event: Any,
+) -> bool:
+    """
+    Persist one security event without breaking request processing.
+
+    Only the event type and exception class are logged on failure.
+    Event metadata and credentials are never included in this fallback
+    log message.
+    """
+
+    try:
+        security_event_store.append(
+            **event
+        )
+
+    except Exception as exc:
+        security_audit_logger.error(
+            "Security event persistence failed | "
+            "event_type=%s | error_type=%s",
+            str(
+                event.get(
+                    "event_type",
+                    "unknown",
+                )
+            ),
+            type(exc).__name__,
+        )
+
+        return False
+
+    return True
+
+
 __all__ = [
     "SECURITY_EVENT_TABLE",
     "SECURITY_EVENT_TYPES",
     "SECURITY_SEVERITIES",
     "SQLiteSecurityEventStore",
+    "record_security_event_safely",
     "sanitize_metadata",
     "security_event_store",
 ]

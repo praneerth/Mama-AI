@@ -25,6 +25,9 @@ from fastapi.security import (
 )
 
 from app.config import settings
+from app.database.security_event_db import (
+    record_security_event_safely,
+)
 
 
 router = APIRouter(
@@ -84,12 +87,32 @@ def configured_owner_id() -> str:
     ).strip()
 
     if not owner_id:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "Mama AI authentication owner "
-                "is not configured."
+        detail = (
+            "Mama AI authentication owner "
+            "is not configured."
+        )
+
+        record_security_event_safely(
+            event_type=(
+                "security_configuration_error"
             ),
+            severity="error",
+            status_code=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+            ),
+            message=detail,
+            metadata={
+                "configuration_field": (
+                    "AUTH_OWNER_ID"
+                ),
+            },
+        )
+
+        raise HTTPException(
+            status_code=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+            ),
+            detail=detail,
         )
 
     return owner_id
@@ -105,13 +128,40 @@ def _configured_token() -> str:
     )
 
     if len(token) < minimum_length:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "Mama AI authentication is enabled "
-                "but its server token is not configured "
-                "securely."
+        detail = (
+            "Mama AI authentication is enabled "
+            "but its server token is not configured "
+            "securely."
+        )
+
+        record_security_event_safely(
+            event_type=(
+                "security_configuration_error"
             ),
+            severity="error",
+            owner_id=str(
+                settings.AUTH_OWNER_ID
+            ).strip() or None,
+            status_code=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+            ),
+            message=detail,
+            metadata={
+                "configuration_field": (
+                    "AUTH_TOKEN"
+                ),
+                "minimum_length": (
+                    minimum_length
+                ),
+                "configured_length": len(token),
+            },
+        )
+
+        raise HTTPException(
+            status_code=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+            ),
+            detail=detail,
         )
 
     return token
@@ -122,6 +172,16 @@ def _token_fingerprint(
 ) -> str:
     digest = hashlib.sha256(
         token.encode("utf-8")
+    ).hexdigest()
+
+    return digest[:12]
+
+
+def _owner_fingerprint(
+    owner_id: str,
+) -> str:
+    digest = hashlib.sha256(
+        owner_id.encode("utf-8")
     ).hexdigest()
 
     return digest[:12]
@@ -166,12 +226,36 @@ def resolve_requested_owner(
         requested_owner_id,
         owner_id,
     ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                "The authenticated principal cannot "
-                "act for another owner."
+        detail = (
+            "The authenticated principal cannot "
+            "act for another owner."
+        )
+
+        record_security_event_safely(
+            event_type="owner_mismatch",
+            severity="warning",
+            owner_id=owner_id,
+            status_code=(
+                status.HTTP_403_FORBIDDEN
             ),
+            message=detail,
+            metadata={
+                "requested_owner_fingerprint": (
+                    _owner_fingerprint(
+                        requested_owner_id
+                    )
+                ),
+                "authorization_check": (
+                    "legacy_owner_parameter"
+                ),
+            },
+        )
+
+        raise HTTPException(
+            status_code=(
+                status.HTTP_403_FORBIDDEN
+            ),
+            detail=detail,
         )
 
     return owner_id
@@ -211,9 +295,36 @@ def require_resource_owner(
             owner_id,
         )
     ):
+        detail = (
+            f"{resource_name} was not found."
+        )
+
+        metadata: dict[str, Any] = {
+            "resource_name": resource_name,
+            "authorization_check": (
+                "stored_resource_owner"
+            ),
+        }
+
+        if resource_owner_id:
+            metadata[
+                "resource_owner_fingerprint"
+            ] = _owner_fingerprint(
+                resource_owner_id
+            )
+
+        record_security_event_safely(
+            event_type="owner_mismatch",
+            severity="warning",
+            owner_id=owner_id,
+            status_code=404,
+            message=detail,
+            metadata=metadata,
+        )
+
         raise HTTPException(
             status_code=404,
-            detail=f"{resource_name} was not found.",
+            detail=detail,
         )
 
     return owner_id
@@ -270,8 +381,33 @@ def require_principal(
         supplied_token,
         expected_token,
     ):
-        raise _authentication_error(
+        detail = (
             "Bearer token is invalid."
+        )
+
+        record_security_event_safely(
+            event_type="invalid_token",
+            severity="warning",
+            client_ref=(
+                "credential:"
+                + _token_fingerprint(
+                    supplied_token
+                )
+            ),
+            owner_id=owner_id,
+            status_code=(
+                status.HTTP_401_UNAUTHORIZED
+            ),
+            message=detail,
+            metadata={
+                "authentication_method": (
+                    "bearer_token"
+                ),
+            },
+        )
+
+        raise _authentication_error(
+            detail
         )
 
     return AuthenticatedPrincipal(

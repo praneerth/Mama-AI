@@ -23,6 +23,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from app.config import settings
+from app.database.security_event_db import (
+    record_security_event_safely,
+)
 
 
 security_logger = logging.getLogger(
@@ -697,6 +700,29 @@ class RateLimitMiddleware(
                 cooldown.retry_after,
             )
 
+            record_security_event_safely(
+                event_type=(
+                    "authentication_cooldown_blocked"
+                ),
+                severity="warning",
+                client_ref=client_identifier,
+                request_method=request.method,
+                request_path=request.url.path,
+                status_code=429,
+                retry_after_seconds=(
+                    cooldown.retry_after
+                ),
+                message=(
+                    "Request blocked by active "
+                    "authentication cooldown."
+                ),
+                metadata={
+                    "failure_count": (
+                        cooldown.failures
+                    ),
+                },
+            )
+
             return _too_many_requests_response(
                 detail=(
                     "Too many failed authentication "
@@ -744,6 +770,29 @@ class RateLimitMiddleware(
                 request.method,
                 request.url.path,
                 general_result.retry_after,
+            )
+
+            record_security_event_safely(
+                event_type="rate_limit_exceeded",
+                severity="warning",
+                client_ref=client_identifier,
+                request_method=request.method,
+                request_path=request.url.path,
+                status_code=429,
+                retry_after_seconds=(
+                    general_result.retry_after
+                ),
+                message=(
+                    "General API rate limit exceeded."
+                ),
+                metadata={
+                    "category": (
+                        general_result.category
+                    ),
+                    "limit": (
+                        general_result.limit
+                    ),
+                },
             )
 
             return _too_many_requests_response(
@@ -800,6 +849,38 @@ class RateLimitMiddleware(
                     category_result.retry_after,
                 )
 
+                record_security_event_safely(
+                    event_type=(
+                        "rate_limit_exceeded"
+                    ),
+                    severity="warning",
+                    client_ref=(
+                        client_identifier
+                    ),
+                    request_method=(
+                        request.method
+                    ),
+                    request_path=(
+                        request.url.path
+                    ),
+                    status_code=429,
+                    retry_after_seconds=(
+                        category_result.retry_after
+                    ),
+                    message=(
+                        "Endpoint-specific API "
+                        "rate limit exceeded."
+                    ),
+                    metadata={
+                        "category": (
+                            category_result.category
+                        ),
+                        "limit": (
+                            category_result.limit
+                        ),
+                    },
+                )
+
                 return _too_many_requests_response(
                     detail=(
                         "Too many requests. "
@@ -847,7 +928,58 @@ class RateLimitMiddleware(
                 abuse_result.blocked,
             )
 
+            record_security_event_safely(
+                event_type=(
+                    "authentication_failed"
+                ),
+                severity="warning",
+                client_ref=client_identifier,
+                request_method=request.method,
+                request_path=request.url.path,
+                status_code=401,
+                message=(
+                    "Authentication failure recorded."
+                ),
+                metadata={
+                    "failure_count": (
+                        abuse_result.failures
+                    ),
+                    "cooldown_started": (
+                        abuse_result.blocked
+                    ),
+                },
+            )
+
             if abuse_result.blocked:
+                record_security_event_safely(
+                    event_type=(
+                        "authentication_cooldown_started"
+                    ),
+                    severity="warning",
+                    client_ref=(
+                        client_identifier
+                    ),
+                    request_method=(
+                        request.method
+                    ),
+                    request_path=(
+                        request.url.path
+                    ),
+                    status_code=429,
+                    retry_after_seconds=(
+                        abuse_result.retry_after
+                    ),
+                    message=(
+                        "Authentication cooldown "
+                        "started."
+                    ),
+                    metadata={
+                        "failure_count": (
+                            abuse_result.failures
+                        ),
+                    },
+                )
+
                 return _too_many_requests_response(
                     detail=(
                         "Too many failed authentication "
