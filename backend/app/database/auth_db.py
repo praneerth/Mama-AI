@@ -30,9 +30,20 @@ from app.database.database import DATABASE_PATH
 
 USER_TABLE = "user_accounts"
 SESSION_TABLE = "authentication_sessions"
+ACCOUNT_ACTION_TOKEN_TABLE = "account_action_tokens"
 
 USER_STATUSES = {"active", "disabled", "locked"}
 SESSION_STATUSES = {"active", "revoked", "expired"}
+ACCOUNT_ACTION_TOKEN_PURPOSES = {
+    "email_verification",
+    "password_reset",
+}
+ACCOUNT_ACTION_TOKEN_STATUSES = {
+    "active",
+    "consumed",
+    "revoked",
+    "expired",
+}
 
 PASSWORD_MINIMUM_LENGTH = 12
 PASSWORD_MAXIMUM_LENGTH = 1024
@@ -40,6 +51,10 @@ REFRESH_TOKEN_MINIMUM_LENGTH = 32
 REFRESH_TOKEN_MAXIMUM_LENGTH = 2048
 SESSION_MINIMUM_SECONDS = 300
 SESSION_MAXIMUM_SECONDS = 7776000
+ACCOUNT_ACTION_TOKEN_MINIMUM_LENGTH = 32
+ACCOUNT_ACTION_TOKEN_MAXIMUM_LENGTH = 2048
+ACCOUNT_ACTION_TOKEN_MINIMUM_SECONDS = 60
+ACCOUNT_ACTION_TOKEN_MAXIMUM_SECONDS = 604800
 
 SCRYPT_N = 16384
 SCRYPT_R = 8
@@ -203,6 +218,45 @@ def fingerprint_refresh_token(refresh_token: str) -> str:
     ).hexdigest()
 
 
+def fingerprint_account_action_token(
+    token: str,
+    *,
+    purpose: str,
+) -> str:
+    if not isinstance(token, str):
+        raise TypeError("Account action token must be text.")
+
+    token = token.strip()
+
+    if len(token) < ACCOUNT_ACTION_TOKEN_MINIMUM_LENGTH:
+        raise ValueError(
+            "Account action token must contain at least "
+            f"{ACCOUNT_ACTION_TOKEN_MINIMUM_LENGTH} characters."
+        )
+
+    if len(token) > ACCOUNT_ACTION_TOKEN_MAXIMUM_LENGTH:
+        raise ValueError(
+            "Account action token cannot exceed "
+            f"{ACCOUNT_ACTION_TOKEN_MAXIMUM_LENGTH} characters."
+        )
+
+    purpose = purpose.strip().lower() if isinstance(purpose, str) else ""
+
+    if purpose not in ACCOUNT_ACTION_TOKEN_PURPOSES:
+        raise ValueError(
+            f"Unsupported account action token purpose: {purpose}"
+        )
+
+    return hashlib.sha256(
+        (
+            "mama-ai:account-action-token:"
+            + purpose
+            + ":"
+            + token
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 class SQLiteAuthenticationStore:
     """SQLite-backed user-account and refresh-session storage."""
 
@@ -259,7 +313,8 @@ class SQLiteAuthenticationStore:
                         CHECK (status IN ('active', 'disabled', 'locked')),
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
-                    last_login_at TEXT
+                    last_login_at TEXT,
+                    email_verified_at TEXT
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_user_accounts_status
@@ -289,7 +344,43 @@ class SQLiteAuthenticationStore:
 
                 CREATE INDEX IF NOT EXISTS idx_auth_sessions_expiry
                 ON {SESSION_TABLE}(expires_at);
+
+                CREATE TABLE IF NOT EXISTS {ACCOUNT_ACTION_TOKEN_TABLE} (
+                    sequence_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    token_id TEXT NOT NULL UNIQUE,
+                    user_id TEXT NOT NULL,
+                    purpose TEXT NOT NULL
+                        CHECK (purpose IN ('email_verification', 'password_reset')),
+                    token_fingerprint TEXT NOT NULL UNIQUE,
+                    status TEXT NOT NULL
+                        CHECK (status IN ('active', 'consumed', 'revoked', 'expired')),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    consumed_at TEXT,
+                    revoked_at TEXT,
+                    FOREIGN KEY(user_id)
+                        REFERENCES {USER_TABLE}(user_id)
+                        ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_account_action_tokens_user
+                ON {ACCOUNT_ACTION_TOKEN_TABLE}(
+                    user_id,
+                    purpose,
+                    status,
+                    updated_at DESC
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_account_action_tokens_expiry
+                ON {ACCOUNT_ACTION_TOKEN_TABLE}(expires_at);
                 """
+            )
+            self._ensure_column_locked(
+                connection,
+                table_name=USER_TABLE,
+                column_name="email_verified_at",
+                column_definition="TEXT",
             )
 
     def create_user(
@@ -321,9 +412,10 @@ class SQLiteAuthenticationStore:
                         status,
                         created_at,
                         updated_at,
-                        last_login_at
+                        last_login_at,
+                        email_verified_at
                     )
-                    VALUES (?, ?, ?, ?, 'active', ?, ?, NULL)
+                    VALUES (?, ?, ?, ?, 'active', ?, ?, NULL, NULL)
                     """,
                     (
                         user_id,
@@ -577,6 +669,530 @@ class SQLiteAuthenticationStore:
             raise RuntimeError("Updated user account could not be loaded.")
 
         return updated
+
+
+    def create_account_action_token(
+        self,
+        *,
+        user_id: str,
+        purpose: str,
+        token: str,
+        expires_in_seconds: int,
+    ) -> dict[str, Any]:
+        user_id = self._validate_text(
+            user_id,
+            "User ID",
+            128,
+        )
+        purpose = self._validate_account_action_token_purpose(
+            purpose
+        )
+        token_fingerprint = fingerprint_account_action_token(
+            token,
+            purpose=purpose,
+        )
+        expires_in_seconds = (
+            self._validate_account_action_token_expiry(
+                expires_in_seconds
+            )
+        )
+        user = self.get_user(user_id)
+
+        if user is None:
+            raise KeyError(
+                f"User account was not found: {user_id}"
+            )
+
+        if user["status"] != "active":
+            raise PermissionError(
+                "Account action tokens can be created only "
+                "for active user accounts."
+            )
+
+        token_id = uuid4().hex
+        now = self._now()
+        now_text = now.isoformat()
+        expires_at = (
+            now
+            + timedelta(
+                seconds=expires_in_seconds
+            )
+        ).isoformat()
+
+        try:
+            with self._connection() as connection:
+                connection.execute(
+                    "BEGIN IMMEDIATE"
+                )
+                self._expire_account_action_tokens_locked(
+                    connection
+                )
+                connection.execute(
+                    f"""
+                    UPDATE {ACCOUNT_ACTION_TOKEN_TABLE}
+                    SET
+                        status = 'revoked',
+                        updated_at = ?,
+                        revoked_at = ?
+                    WHERE
+                        user_id = ?
+                        AND purpose = ?
+                        AND status = 'active'
+                    """,
+                    (
+                        now_text,
+                        now_text,
+                        user_id,
+                        purpose,
+                    ),
+                )
+                connection.execute(
+                    f"""
+                    INSERT INTO {ACCOUNT_ACTION_TOKEN_TABLE} (
+                        token_id,
+                        user_id,
+                        purpose,
+                        token_fingerprint,
+                        status,
+                        created_at,
+                        updated_at,
+                        expires_at,
+                        consumed_at,
+                        revoked_at
+                    )
+                    VALUES (?, ?, ?, ?, 'active', ?, ?, ?, NULL, NULL)
+                    """,
+                    (
+                        token_id,
+                        user_id,
+                        purpose,
+                        token_fingerprint,
+                        now_text,
+                        now_text,
+                        expires_at,
+                    ),
+                )
+
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(
+                "This account action token is already registered."
+            ) from exc
+
+        created = self.get_account_action_token(
+            token_id
+        )
+
+        if created is None:
+            raise RuntimeError(
+                "Created account action token could not be loaded."
+            )
+
+        return created
+
+    def get_account_action_token(
+        self,
+        token_id: str,
+    ) -> dict[str, Any] | None:
+        token_id = self._validate_text(
+            token_id,
+            "Token ID",
+            128,
+        )
+
+        with self._connection() as connection:
+            self._expire_account_action_tokens_locked(
+                connection
+            )
+            row = connection.execute(
+                f"""
+                SELECT *
+                FROM {ACCOUNT_ACTION_TOKEN_TABLE}
+                WHERE token_id = ?
+                """,
+                (
+                    token_id,
+                ),
+            ).fetchone()
+
+        return self._account_action_token_row_to_dict(
+            row
+        )
+
+    def revoke_account_action_token(
+        self,
+        token_id: str,
+    ) -> dict[str, Any]:
+        token_id = self._validate_text(
+            token_id,
+            "Token ID",
+            128,
+        )
+        now_text = self._now().isoformat()
+
+        with self._connection() as connection:
+            self._expire_account_action_tokens_locked(
+                connection
+            )
+            row = connection.execute(
+                f"""
+                SELECT status
+                FROM {ACCOUNT_ACTION_TOKEN_TABLE}
+                WHERE token_id = ?
+                """,
+                (
+                    token_id,
+                ),
+            ).fetchone()
+
+            if row is None:
+                raise KeyError(
+                    "Account action token was not found."
+                )
+
+            if row["status"] == "active":
+                connection.execute(
+                    f"""
+                    UPDATE {ACCOUNT_ACTION_TOKEN_TABLE}
+                    SET
+                        status = 'revoked',
+                        updated_at = ?,
+                        revoked_at = ?
+                    WHERE token_id = ?
+                    """,
+                    (
+                        now_text,
+                        now_text,
+                        token_id,
+                    ),
+                )
+
+        updated = self.get_account_action_token(
+            token_id
+        )
+
+        if updated is None:
+            raise RuntimeError(
+                "Revoked account action token could not be loaded."
+            )
+
+        return updated
+
+    def confirm_email_verification_token(
+        self,
+        token: str,
+    ) -> dict[str, Any] | None:
+        fingerprint = fingerprint_account_action_token(
+            token,
+            purpose="email_verification",
+        )
+        now_text = self._now().isoformat()
+
+        with self._connection() as connection:
+            connection.execute(
+                "BEGIN IMMEDIATE"
+            )
+            self._expire_account_action_tokens_locked(
+                connection
+            )
+            row = connection.execute(
+                f"""
+                SELECT
+                    t.token_id,
+                    t.user_id
+                FROM {ACCOUNT_ACTION_TOKEN_TABLE} AS t
+                INNER JOIN {USER_TABLE} AS u
+                    ON u.user_id = t.user_id
+                WHERE
+                    t.token_fingerprint = ?
+                    AND t.purpose = 'email_verification'
+                    AND t.status = 'active'
+                    AND u.status = 'active'
+                """,
+                (
+                    fingerprint,
+                ),
+            ).fetchone()
+
+            if row is None:
+                return None
+
+            cursor = connection.execute(
+                f"""
+                UPDATE {ACCOUNT_ACTION_TOKEN_TABLE}
+                SET
+                    status = 'consumed',
+                    updated_at = ?,
+                    consumed_at = ?
+                WHERE
+                    token_id = ?
+                    AND status = 'active'
+                """,
+                (
+                    now_text,
+                    now_text,
+                    row["token_id"],
+                ),
+            )
+
+            if cursor.rowcount != 1:
+                return None
+
+            connection.execute(
+                f"""
+                UPDATE {USER_TABLE}
+                SET
+                    email_verified_at = COALESCE(
+                        email_verified_at,
+                        ?
+                    ),
+                    updated_at = ?
+                WHERE user_id = ?
+                """,
+                (
+                    now_text,
+                    now_text,
+                    row["user_id"],
+                ),
+            )
+            connection.execute(
+                f"""
+                UPDATE {ACCOUNT_ACTION_TOKEN_TABLE}
+                SET
+                    status = 'revoked',
+                    updated_at = ?,
+                    revoked_at = ?
+                WHERE
+                    user_id = ?
+                    AND purpose = 'email_verification'
+                    AND status = 'active'
+                """,
+                (
+                    now_text,
+                    now_text,
+                    row["user_id"],
+                ),
+            )
+            user_id = row["user_id"]
+
+        return self.get_user(
+            user_id
+        )
+
+    def reset_password_with_token(
+        self,
+        *,
+        token: str,
+        new_password: str,
+    ) -> dict[str, Any] | None:
+        fingerprint = fingerprint_account_action_token(
+            token,
+            purpose="password_reset",
+        )
+        new_password_hash = hash_password(
+            new_password
+        )
+        now_text = self._now().isoformat()
+
+        with self._connection() as connection:
+            connection.execute(
+                "BEGIN IMMEDIATE"
+            )
+            self._expire_account_action_tokens_locked(
+                connection
+            )
+            row = connection.execute(
+                f"""
+                SELECT
+                    t.token_id,
+                    t.user_id
+                FROM {ACCOUNT_ACTION_TOKEN_TABLE} AS t
+                INNER JOIN {USER_TABLE} AS u
+                    ON u.user_id = t.user_id
+                WHERE
+                    t.token_fingerprint = ?
+                    AND t.purpose = 'password_reset'
+                    AND t.status = 'active'
+                    AND u.status = 'active'
+                """,
+                (
+                    fingerprint,
+                ),
+            ).fetchone()
+
+            if row is None:
+                return None
+
+            cursor = connection.execute(
+                f"""
+                UPDATE {ACCOUNT_ACTION_TOKEN_TABLE}
+                SET
+                    status = 'consumed',
+                    updated_at = ?,
+                    consumed_at = ?
+                WHERE
+                    token_id = ?
+                    AND status = 'active'
+                """,
+                (
+                    now_text,
+                    now_text,
+                    row["token_id"],
+                ),
+            )
+
+            if cursor.rowcount != 1:
+                return None
+
+            connection.execute(
+                f"""
+                UPDATE {USER_TABLE}
+                SET
+                    password_hash = ?,
+                    updated_at = ?
+                WHERE user_id = ?
+                """,
+                (
+                    new_password_hash,
+                    now_text,
+                    row["user_id"],
+                ),
+            )
+            revoked_cursor = connection.execute(
+                f"""
+                UPDATE {SESSION_TABLE}
+                SET
+                    status = 'revoked',
+                    updated_at = ?,
+                    revoked_at = ?
+                WHERE
+                    user_id = ?
+                    AND status = 'active'
+                """,
+                (
+                    now_text,
+                    now_text,
+                    row["user_id"],
+                ),
+            )
+            connection.execute(
+                f"""
+                UPDATE {ACCOUNT_ACTION_TOKEN_TABLE}
+                SET
+                    status = 'revoked',
+                    updated_at = ?,
+                    revoked_at = ?
+                WHERE
+                    user_id = ?
+                    AND purpose = 'password_reset'
+                    AND status = 'active'
+                """,
+                (
+                    now_text,
+                    now_text,
+                    row["user_id"],
+                ),
+            )
+            user_id = row["user_id"]
+            revoked_sessions = int(
+                revoked_cursor.rowcount
+            )
+
+        user = self.get_user(
+            user_id
+        )
+
+        if user is None:
+            raise RuntimeError(
+                "Updated user account could not be loaded."
+            )
+
+        return {
+            "user": user,
+            "revoked_sessions": revoked_sessions,
+        }
+
+    def count_account_action_tokens(
+        self,
+        *,
+        user_id: str,
+        purpose: str | None = None,
+        status: str | None = None,
+    ) -> int:
+        user_id = self._validate_text(
+            user_id,
+            "User ID",
+            128,
+        )
+        conditions = ["user_id = ?"]
+        parameters: list[Any] = [user_id]
+
+        if purpose is not None:
+            purpose = (
+                self._validate_account_action_token_purpose(
+                    purpose
+                )
+            )
+            conditions.append("purpose = ?")
+            parameters.append(purpose)
+
+        if status is not None:
+            status = (
+                self._validate_account_action_token_status(
+                    status
+                )
+            )
+            conditions.append("status = ?")
+            parameters.append(status)
+
+        with self._connection() as connection:
+            self._expire_account_action_tokens_locked(
+                connection
+            )
+            row = connection.execute(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM {ACCOUNT_ACTION_TOKEN_TABLE}
+                WHERE {" AND ".join(conditions)}
+                """,
+                tuple(parameters),
+            ).fetchone()
+
+        return int(
+            row["total"]
+        )
+
+    def delete_expired_account_action_tokens(
+        self,
+        *,
+        limit: int = 1000,
+    ) -> int:
+        limit = self._validate_limit(
+            limit
+        )
+
+        with self._connection() as connection:
+            self._expire_account_action_tokens_locked(
+                connection
+            )
+            cursor = connection.execute(
+                f"""
+                DELETE FROM {ACCOUNT_ACTION_TOKEN_TABLE}
+                WHERE sequence_id IN (
+                    SELECT sequence_id
+                    FROM {ACCOUNT_ACTION_TOKEN_TABLE}
+                    WHERE status = 'expired'
+                    ORDER BY sequence_id ASC
+                    LIMIT ?
+                )
+                """,
+                (
+                    limit,
+                ),
+            )
+
+        return int(
+            cursor.rowcount
+        )
 
     def create_session(
         self,
@@ -1081,8 +1697,35 @@ class SQLiteAuthenticationStore:
 
     def clear(self) -> None:
         with self._connection() as connection:
+            connection.execute(
+                f"DELETE FROM {ACCOUNT_ACTION_TOKEN_TABLE}"
+            )
             connection.execute(f"DELETE FROM {SESSION_TABLE}")
             connection.execute(f"DELETE FROM {USER_TABLE}")
+
+    def _expire_account_action_tokens_locked(
+        self,
+        connection: sqlite3.Connection,
+    ) -> int:
+        now_text = self._now().isoformat()
+        cursor = connection.execute(
+            f"""
+            UPDATE {ACCOUNT_ACTION_TOKEN_TABLE}
+            SET
+                status = 'expired',
+                updated_at = ?
+            WHERE
+                status = 'active'
+                AND expires_at <= ?
+            """,
+            (
+                now_text,
+                now_text,
+            ),
+        )
+        return int(
+            cursor.rowcount
+        )
 
     def _expire_sessions_locked(self, connection: sqlite3.Connection) -> int:
         now_text = self._now().isoformat()
@@ -1095,6 +1738,28 @@ class SQLiteAuthenticationStore:
             (now_text, now_text),
         )
         return int(cursor.rowcount)
+
+    @staticmethod
+    def _ensure_column_locked(
+        connection: sqlite3.Connection,
+        *,
+        table_name: str,
+        column_name: str,
+        column_definition: str,
+    ) -> None:
+        columns = {
+            row["name"]
+            for row in connection.execute(
+                f"PRAGMA table_info({table_name})"
+            ).fetchall()
+        }
+
+        if column_name not in columns:
+            connection.execute(
+                f"ALTER TABLE {table_name} "
+                f"ADD COLUMN {column_name} "
+                f"{column_definition}"
+            )
 
     def _now(self) -> datetime:
         current = self._clock()
@@ -1120,6 +1785,32 @@ class SQLiteAuthenticationStore:
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "last_login_at": row["last_login_at"],
+            "email_verified_at": row["email_verified_at"],
+            "email_verified": (
+                row["email_verified_at"] is not None
+            ),
+        }
+
+    @staticmethod
+    def _account_action_token_row_to_dict(
+        row: sqlite3.Row | None,
+    ) -> dict[str, Any] | None:
+        if row is None:
+            return None
+
+        fingerprint = row["token_fingerprint"]
+
+        return {
+            "token_id": row["token_id"],
+            "user_id": row["user_id"],
+            "purpose": row["purpose"],
+            "token_ref": fingerprint[:12],
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "expires_at": row["expires_at"],
+            "consumed_at": row["consumed_at"],
+            "revoked_at": row["revoked_at"],
         }
 
     @staticmethod
@@ -1196,6 +1887,72 @@ class SQLiteAuthenticationStore:
 
         return status
 
+    @classmethod
+    def _validate_account_action_token_purpose(
+        cls,
+        purpose: str,
+    ) -> str:
+        purpose = cls._validate_text(
+            purpose,
+            "Account action token purpose",
+            64,
+        ).lower()
+
+        if purpose not in ACCOUNT_ACTION_TOKEN_PURPOSES:
+            raise ValueError(
+                "Unsupported account action token purpose: "
+                f"{purpose}"
+            )
+
+        return purpose
+
+    @classmethod
+    def _validate_account_action_token_status(
+        cls,
+        status: str,
+    ) -> str:
+        status = cls._validate_text(
+            status,
+            "Account action token status",
+            32,
+        ).lower()
+
+        if status not in ACCOUNT_ACTION_TOKEN_STATUSES:
+            raise ValueError(
+                "Unsupported account action token status: "
+                f"{status}"
+            )
+
+        return status
+
+    @staticmethod
+    def _validate_account_action_token_expiry(
+        expires_in_seconds: int,
+    ) -> int:
+        if isinstance(
+            expires_in_seconds,
+            bool,
+        ) or not isinstance(
+            expires_in_seconds,
+            int,
+        ):
+            raise TypeError(
+                "Account action token expiry must be an integer."
+            )
+
+        if not (
+            ACCOUNT_ACTION_TOKEN_MINIMUM_SECONDS
+            <= expires_in_seconds
+            <= ACCOUNT_ACTION_TOKEN_MAXIMUM_SECONDS
+        ):
+            raise ValueError(
+                "Account action token expiry must be between "
+                f"{ACCOUNT_ACTION_TOKEN_MINIMUM_SECONDS} and "
+                f"{ACCOUNT_ACTION_TOKEN_MAXIMUM_SECONDS} seconds."
+            )
+
+        return expires_in_seconds
+
     @staticmethod
     def _validate_session_expiry(expires_in_seconds: int) -> int:
         if isinstance(expires_in_seconds, bool) or not isinstance(
@@ -1228,6 +1985,9 @@ authentication_store = SQLiteAuthenticationStore()
 
 
 __all__ = [
+    "ACCOUNT_ACTION_TOKEN_PURPOSES",
+    "ACCOUNT_ACTION_TOKEN_STATUSES",
+    "ACCOUNT_ACTION_TOKEN_TABLE",
     "PASSWORD_MAXIMUM_LENGTH",
     "PASSWORD_MINIMUM_LENGTH",
     "REFRESH_TOKEN_MAXIMUM_LENGTH",
@@ -1238,6 +1998,7 @@ __all__ = [
     "USER_STATUSES",
     "USER_TABLE",
     "authentication_store",
+    "fingerprint_account_action_token",
     "fingerprint_refresh_token",
     "hash_password",
     "normalize_email",

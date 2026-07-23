@@ -64,6 +64,20 @@ class InvalidCurrentPasswordError(
 ):
     """The supplied current password could not be verified."""
 
+
+
+class InvalidEmailVerificationTokenError(
+    AuthenticationServiceError
+):
+    """Email-verification token validation failed."""
+
+
+class InvalidPasswordResetTokenError(
+    AuthenticationServiceError
+):
+    """Password-reset token validation failed."""
+
+
 class InvalidAccountAccessTokenError(
     AuthenticationServiceError
 ):
@@ -80,6 +94,8 @@ class AuthenticationService:
         signing_secret: str | None = None,
         access_token_seconds: int | None = None,
         refresh_token_seconds: int | None = None,
+        email_verification_token_seconds: int | None = None,
+        password_reset_token_seconds: int | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._store = store
@@ -91,6 +107,12 @@ class AuthenticationService:
         )
         self._explicit_refresh_seconds = (
             refresh_token_seconds
+        )
+        self._explicit_email_verification_seconds = (
+            email_verification_token_seconds
+        )
+        self._explicit_password_reset_seconds = (
+            password_reset_token_seconds
         )
         self._clock = (
             clock
@@ -326,6 +348,156 @@ class AuthenticationService:
                 "Current password is invalid."
             ) from exc
 
+
+    def request_email_verification(
+        self,
+        *,
+        user_id: str,
+    ) -> dict[str, Any]:
+        user = self._store.get_user(
+            user_id
+        )
+
+        if (
+            user is None
+            or user["status"] != "active"
+        ):
+            raise InvalidAccountAccessTokenError(
+                "Bearer token is invalid."
+            )
+
+        if user["email_verified"]:
+            return {
+                "user": user,
+                "already_verified": True,
+                "verification_token": None,
+                "token_record": None,
+            }
+
+        token = self._new_account_action_token()
+        record = self._store.create_account_action_token(
+            user_id=user["user_id"],
+            purpose="email_verification",
+            token=token,
+            expires_in_seconds=(
+                self._email_verification_seconds()
+            ),
+        )
+
+        return {
+            "user": user,
+            "already_verified": False,
+            "verification_token": token,
+            "token_record": record,
+        }
+
+    def confirm_email_verification(
+        self,
+        *,
+        token: str,
+    ) -> dict[str, Any]:
+        try:
+            user = (
+                self._store.confirm_email_verification_token(
+                    token
+                )
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ) as exc:
+            raise InvalidEmailVerificationTokenError(
+                "Email verification token is invalid or expired."
+            ) from exc
+
+        if user is None:
+            raise InvalidEmailVerificationTokenError(
+                "Email verification token is invalid or expired."
+            )
+
+        return user
+
+    def request_password_reset(
+        self,
+        *,
+        email: str,
+    ) -> dict[str, Any] | None:
+        try:
+            user = self._store.get_user_by_email(
+                email
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+            return None
+
+        if (
+            user is None
+            or user["status"] != "active"
+        ):
+            return None
+
+        token = self._new_account_action_token()
+        record = self._store.create_account_action_token(
+            user_id=user["user_id"],
+            purpose="password_reset",
+            token=token,
+            expires_in_seconds=(
+                self._password_reset_seconds()
+            ),
+        )
+
+        return {
+            "user": user,
+            "password_reset_token": token,
+            "token_record": record,
+        }
+
+    def reset_password(
+        self,
+        *,
+        token: str,
+        new_password: str,
+    ) -> dict[str, Any]:
+        try:
+            result = self._store.reset_password_with_token(
+                token=token,
+                new_password=new_password,
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ) as exc:
+            if "password" in str(exc).lower():
+                raise
+
+            raise InvalidPasswordResetTokenError(
+                "Password reset token is invalid or expired."
+            ) from exc
+
+        if result is None:
+            raise InvalidPasswordResetTokenError(
+                "Password reset token is invalid or expired."
+            )
+
+        return result
+
+    def revoke_account_action_token(
+        self,
+        *,
+        token_id: str,
+    ) -> None:
+        try:
+            self._store.revoke_account_action_token(
+                token_id
+            )
+        except KeyError:
+            return
+
     def authenticate_access_token(
         self,
         access_token: str,
@@ -491,6 +663,53 @@ class AuthenticationService:
 
         return value
 
+
+    def _email_verification_seconds(
+        self,
+    ) -> int:
+        value = (
+            self._explicit_email_verification_seconds
+            if self._explicit_email_verification_seconds
+            is not None
+            else int(
+                settings.AUTH_EMAIL_VERIFICATION_TOKEN_SECONDS
+            )
+        )
+
+        if not 60 <= value <= 604800:
+            raise AuthenticationConfigurationError(
+                "Email-verification token expiry must be between "
+                "60 and 604800 seconds."
+            )
+
+        return value
+
+    def _password_reset_seconds(
+        self,
+    ) -> int:
+        value = (
+            self._explicit_password_reset_seconds
+            if self._explicit_password_reset_seconds
+            is not None
+            else int(
+                settings.AUTH_PASSWORD_RESET_TOKEN_SECONDS
+            )
+        )
+
+        if not 60 <= value <= 604800:
+            raise AuthenticationConfigurationError(
+                "Password-reset token expiry must be between "
+                "60 and 604800 seconds."
+            )
+
+        return value
+
+    @staticmethod
+    def _new_account_action_token() -> str:
+        return secrets.token_urlsafe(
+            48
+        )
+
     @staticmethod
     def _new_refresh_token() -> str:
         return secrets.token_urlsafe(
@@ -510,7 +729,9 @@ __all__ = [
     "AuthenticationServiceError",
     "InvalidAccountAccessTokenError",
     "InvalidCredentialsError",
+    "InvalidEmailVerificationTokenError",
     "InvalidRefreshTokenError",
+    "InvalidPasswordResetTokenError",
     "InvalidCurrentPasswordError",
     "SessionNotFoundError",
     "authentication_service",

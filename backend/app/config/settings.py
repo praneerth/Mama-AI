@@ -160,6 +160,63 @@ AUTH_REFRESH_TOKEN_SECONDS = _environment_int(
     2592000,
 )
 
+AUTH_EMAIL_VERIFICATION_TOKEN_SECONDS = _environment_int(
+    "MAMA_AUTH_EMAIL_VERIFICATION_TOKEN_SECONDS",
+    86400,
+    minimum=60,
+)
+
+AUTH_PASSWORD_RESET_TOKEN_SECONDS = _environment_int(
+    "MAMA_AUTH_PASSWORD_RESET_TOKEN_SECONDS",
+    1800,
+    minimum=60,
+)
+
+AUTH_DEVELOPMENT_TOKEN_EXPOSURE_ENABLED = _environment_bool(
+    "MAMA_AUTH_DEVELOPMENT_TOKEN_EXPOSURE_ENABLED",
+    False,
+)
+
+AUTH_PUBLIC_BASE_URL = os.getenv(
+    "MAMA_AUTH_PUBLIC_BASE_URL",
+    "http://127.0.0.1:8000",
+).strip().rstrip("/")
+
+AUTH_SMTP_HOST = os.getenv(
+    "MAMA_AUTH_SMTP_HOST",
+    "",
+).strip()
+
+AUTH_SMTP_PORT = _environment_int(
+    "MAMA_AUTH_SMTP_PORT",
+    587,
+)
+
+AUTH_SMTP_USERNAME = os.getenv(
+    "MAMA_AUTH_SMTP_USERNAME",
+    "",
+).strip()
+
+AUTH_SMTP_PASSWORD = os.getenv(
+    "MAMA_AUTH_SMTP_PASSWORD",
+    "",
+)
+
+AUTH_SMTP_FROM_EMAIL = os.getenv(
+    "MAMA_AUTH_SMTP_FROM_EMAIL",
+    "",
+).strip()
+
+AUTH_SMTP_USE_TLS = _environment_bool(
+    "MAMA_AUTH_SMTP_USE_TLS",
+    True,
+)
+
+AUTH_SMTP_TIMEOUT_SECONDS = _environment_int(
+    "MAMA_AUTH_SMTP_TIMEOUT_SECONDS",
+    20,
+)
+
 
 # =====================================================
 # Rate Limiting and Authentication-Abuse Protection

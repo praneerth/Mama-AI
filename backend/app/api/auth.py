@@ -35,10 +35,17 @@ from app.core.auth_service import (
     AuthenticationConfigurationError,
     InvalidAccountAccessTokenError,
     InvalidCredentialsError,
+    InvalidEmailVerificationTokenError,
     InvalidCurrentPasswordError,
     InvalidRefreshTokenError,
+    InvalidPasswordResetTokenError,
     SessionNotFoundError,
     authentication_service,
+)
+from app.core.auth_email import (
+    AuthenticationEmailConfigurationError,
+    AuthenticationEmailDeliveryError,
+    authentication_email_sender,
 )
 from app.core.auth_tokens import TOKEN_PREFIX
 from app.core.principal_context import (
@@ -101,6 +108,19 @@ class RefreshRequest(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
+    new_password: str
+
+
+class ConfirmEmailVerificationRequest(BaseModel):
+    token: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
     new_password: str
 
 
@@ -887,6 +907,180 @@ def change_account_password(
         **result,
     }
 
+
+
+@router.post("/email-verification/request")
+def request_email_verification(
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_principal),
+    ],
+) -> dict[str, Any]:
+    principal = _require_account_principal(
+        principal
+    )
+
+    try:
+        result = (
+            authentication_service.request_email_verification(
+                user_id=principal.owner_id
+            )
+        )
+
+    except InvalidAccountAccessTokenError as exc:
+        raise _authentication_error(
+            "Bearer token is invalid."
+        ) from exc
+
+    if result["already_verified"]:
+        return {
+            "success": True,
+            "status": "already_verified",
+            "user": result["user"],
+        }
+
+    token = result["verification_token"]
+    token_record = result["token_record"]
+    response: dict[str, Any] = {
+        "success": True,
+        "status": "verification_requested",
+        "expires_at": token_record[
+            "expires_at"
+        ],
+    }
+
+    if authentication_email_sender.development_token_exposure_enabled():
+        response["development_token"] = token
+        return response
+
+    try:
+        authentication_email_sender.send_email_verification(
+            user=result["user"],
+            token=token,
+        )
+
+    except (
+        AuthenticationEmailConfigurationError,
+        AuthenticationEmailDeliveryError,
+    ) as exc:
+        authentication_service.revoke_account_action_token(
+            token_id=token_record["token_id"]
+        )
+        raise HTTPException(
+            status_code=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+            ),
+            detail=(
+                "Authentication email delivery is unavailable."
+            ),
+        ) from exc
+
+    return response
+
+
+@router.post("/email-verification/confirm")
+def confirm_email_verification(
+    payload: ConfirmEmailVerificationRequest,
+) -> dict[str, Any]:
+    try:
+        user = (
+            authentication_service.confirm_email_verification(
+                token=payload.token
+            )
+        )
+
+    except InvalidEmailVerificationTokenError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    return {
+        "success": True,
+        "user": user,
+    }
+
+
+@router.post(
+    "/password/forgot",
+    status_code=202,
+)
+def forgot_account_password(
+    payload: ForgotPasswordRequest,
+) -> dict[str, Any]:
+    result = authentication_service.request_password_reset(
+        email=payload.email
+    )
+    response: dict[str, Any] = {
+        "success": True,
+        "status": "password_reset_requested",
+        "message": (
+            "If an active account matches that email, "
+            "password-reset instructions will be sent."
+        ),
+    }
+
+    if result is None:
+        return response
+
+    token = result["password_reset_token"]
+    token_record = result["token_record"]
+
+    if authentication_email_sender.development_token_exposure_enabled():
+        response["development_token"] = token
+        response["expires_at"] = token_record[
+            "expires_at"
+        ]
+        return response
+
+    try:
+        authentication_email_sender.send_password_reset(
+            user=result["user"],
+            token=token,
+        )
+
+    except (
+        AuthenticationEmailConfigurationError,
+        AuthenticationEmailDeliveryError,
+    ):
+        authentication_service.revoke_account_action_token(
+            token_id=token_record["token_id"]
+        )
+
+    return response
+
+
+@router.post("/password/reset")
+def reset_account_password(
+    payload: ResetPasswordRequest,
+) -> dict[str, Any]:
+    try:
+        result = authentication_service.reset_password(
+            token=payload.token,
+            new_password=payload.new_password,
+        )
+
+    except InvalidPasswordResetTokenError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    return {
+        "success": True,
+        **result,
+    }
+
+
 @router.get("/me")
 def authenticated_identity(
     principal: Annotated[
@@ -905,19 +1099,26 @@ def authenticated_identity(
 __all__ = [
     "AuthenticatedPrincipal",
     "ChangePasswordRequest",
+    "ConfirmEmailVerificationRequest",
+    "ForgotPasswordRequest",
     "LoginRequest",
     "RefreshRequest",
+    "ResetPasswordRequest",
     "RegisterRequest",
     "authenticate_bearer_token",
     "authenticated_identity",
     "bearer_scheme",
     "change_account_password",
+    "confirm_email_verification",
     "configured_owner_id",
+    "forgot_account_password",
     "login_account",
     "list_account_sessions",
     "logout_account_session",
     "logout_all_account_sessions",
     "refresh_account_session",
+    "request_email_verification",
+    "reset_account_password",
     "revoke_account_session",
     "register_account",
     "require_principal",
