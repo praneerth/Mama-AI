@@ -30,6 +30,9 @@ from app.database.security_event_db import (
     security_event_store,
 )
 from app.exceptions import register_exception_handlers
+from app.middleware.principal_context import (
+    PrincipalContextMiddleware,
+)
 from app.middleware import (
     RateLimitMiddleware,
     RequestLoggerMiddleware,
@@ -96,7 +99,11 @@ app = FastAPI(
 register_exception_handlers(app)
 
 # Middleware is added from innermost to outermost. CORS remains
-# outermost so rate-limit responses receive the same browser headers.
+# outermost while principal context is innermost.
+app.add_middleware(
+    PrincipalContextMiddleware
+)
+
 app.add_middleware(
     RateLimitMiddleware
 )

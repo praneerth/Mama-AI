@@ -1,8 +1,12 @@
 """
-Bearer-token authentication and single-owner authorization for Mama AI.
+Mama AI authentication API.
 
-The authenticated owner identity is derived from trusted server
-configuration, never from an untrusted request body or query parameter.
+Two authentication modes coexist during migration:
+
+1. Account access tokens backed by persistent user sessions.
+2. The existing configured static Bearer token for compatibility.
+
+Account passwords and refresh tokens are never logged or persisted raw.
 """
 
 from __future__ import annotations
@@ -23,8 +27,20 @@ from fastapi.security import (
     HTTPAuthorizationCredentials,
     HTTPBearer,
 )
+from pydantic import BaseModel
 
 from app.config import settings
+from app.core.auth_service import (
+    AccountExistsError,
+    AuthenticationConfigurationError,
+    InvalidAccountAccessTokenError,
+    InvalidCredentialsError,
+    InvalidRefreshTokenError,
+    authentication_service,
+)
+from app.core.principal_context import (
+    get_current_principal,
+)
 from app.database.security_event_db import (
     record_security_event_safely,
 )
@@ -48,6 +64,7 @@ class AuthenticatedPrincipal:
     owner_id: str
     authentication_method: str
     token_fingerprint: str | None = None
+    session_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -58,7 +75,25 @@ class AuthenticatedPrincipal:
             "token_fingerprint": (
                 self.token_fingerprint
             ),
+            "session_id": self.session_id,
         }
+
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    display_name: str | None = None
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+    device_name: str | None = None
+    client_ref: str | None = None
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
 
 
 def _authentication_error(
@@ -75,12 +110,26 @@ def _authentication_error(
 
 def configured_owner_id() -> str:
     """
-    Return the owner bound to the configured authentication token.
+    Return the request principal owner, falling back to legacy config.
 
-    Mama AI currently uses one opaque token mapped to one local owner.
-    Multi-user identity storage can replace this mapping later without
-    changing protected endpoint behavior.
+    The middleware sets request-local principal context before protected
+    route functions execute. Direct unit calls and development code keep
+    the previous configured-owner behavior.
     """
+
+    principal = get_current_principal()
+
+    if principal is not None:
+        owner_id = str(
+            getattr(
+                principal,
+                "owner_id",
+                "",
+            )
+        ).strip()
+
+        if owner_id:
+            return owner_id
 
     owner_id = str(
         settings.AUTH_OWNER_ID
@@ -118,10 +167,18 @@ def configured_owner_id() -> str:
     return owner_id
 
 
-def _configured_token() -> str:
+def _configured_token_if_available() -> str | None:
+    if not bool(
+        settings.AUTH_STATIC_COMPATIBILITY_ENABLED
+    ):
+        return None
+
     token = str(
         settings.AUTH_TOKEN
     ).strip()
+
+    if not token:
+        return None
 
     minimum_length = int(
         settings.AUTH_MINIMUM_TOKEN_LENGTH
@@ -129,9 +186,8 @@ def _configured_token() -> str:
 
     if len(token) < minimum_length:
         detail = (
-            "Mama AI authentication is enabled "
-            "but its server token is not configured "
-            "securely."
+            "Mama AI static authentication token "
+            "is configured insecurely."
         )
 
         record_security_event_safely(
@@ -187,17 +243,147 @@ def _owner_fingerprint(
     return digest[:12]
 
 
+def _record_invalid_token(
+    token: str,
+    *,
+    authentication_method: str,
+) -> None:
+    record_security_event_safely(
+        event_type="invalid_token",
+        severity="warning",
+        client_ref=(
+            "credential:"
+            + _token_fingerprint(
+                token
+            )
+        ),
+        owner_id=str(
+            settings.AUTH_OWNER_ID
+        ).strip() or None,
+        status_code=(
+            status.HTTP_401_UNAUTHORIZED
+        ),
+        message=(
+            "Bearer token is invalid."
+        ),
+        metadata={
+            "authentication_method": (
+                authentication_method
+            ),
+        },
+    )
+
+
+def authenticate_bearer_token(
+    token: str,
+    *,
+    record_failure: bool = True,
+) -> AuthenticatedPrincipal:
+    """Authenticate either a static compatibility token or account token."""
+
+    if not isinstance(token, str):
+        raise _authentication_error(
+            "Bearer token cannot be empty."
+        )
+
+    supplied_token = token.strip()
+
+    if not supplied_token:
+        raise _authentication_error(
+            "Bearer token cannot be empty."
+        )
+
+    expected_token = (
+        _configured_token_if_available()
+    )
+
+    if (
+        expected_token is not None
+        and secrets.compare_digest(
+            supplied_token,
+            expected_token,
+        )
+    ):
+        return AuthenticatedPrincipal(
+            owner_id=str(
+                settings.AUTH_OWNER_ID
+            ).strip(),
+            authentication_method=(
+                "bearer_token"
+            ),
+            token_fingerprint=(
+                _token_fingerprint(
+                    expected_token
+                )
+            ),
+            session_id=None,
+        )
+
+    if bool(
+        settings.ACCOUNT_AUTH_ENABLED
+    ):
+        try:
+            account = (
+                authentication_service.authenticate_access_token(
+                    supplied_token
+                )
+            )
+
+        except AuthenticationConfigurationError as exc:
+            raise HTTPException(
+                status_code=(
+                    status.HTTP_503_SERVICE_UNAVAILABLE
+                ),
+                detail=str(exc),
+            ) from exc
+
+        except InvalidAccountAccessTokenError as exc:
+            if record_failure:
+                _record_invalid_token(
+                    supplied_token,
+                    authentication_method=(
+                        "account_access_token"
+                    ),
+                )
+
+            raise _authentication_error(
+                "Bearer token is invalid."
+            ) from exc
+
+        user = account["user"]
+        session = account["session"]
+
+        return AuthenticatedPrincipal(
+            owner_id=user["user_id"],
+            authentication_method=(
+                "account_access_token"
+            ),
+            token_fingerprint=(
+                _token_fingerprint(
+                    supplied_token
+                )
+            ),
+            session_id=(
+                session["session_id"]
+            ),
+        )
+
+    if record_failure:
+        _record_invalid_token(
+            supplied_token,
+            authentication_method=(
+                "bearer_token"
+            ),
+        )
+
+    raise _authentication_error(
+        "Bearer token is invalid."
+    )
+
+
 def resolve_requested_owner(
     requested_owner_id: str | None,
 ) -> str:
-    """
-    Resolve an optional legacy owner field against the principal owner.
-
-    Legacy clients may still submit owner_id. It is never trusted:
-    omitted values resolve to the authenticated owner and mismatched
-    values are rejected.
-    """
-
     owner_id = configured_owner_id()
 
     if requested_owner_id is None:
@@ -266,13 +452,6 @@ def require_resource_owner(
     *,
     resource_name: str = "Resource",
 ) -> str:
-    """
-    Require a stored resource to belong to the authenticated owner.
-
-    A generic 404 is returned on mismatch to avoid confirming that
-    another owner's resource exists.
-    """
-
     owner_id = configured_owner_id()
 
     if not isinstance(
@@ -336,27 +515,15 @@ def require_principal(
         Depends(bearer_scheme),
     ] = None,
 ) -> AuthenticatedPrincipal:
-    """
-    Resolve the authenticated Mama AI principal.
-
-    In normal operation authentication is enabled and a Bearer token is
-    required. Disabling authentication is supported only for deliberate
-    local-development use and remains visible through the returned
-    authentication method.
-    """
-
-    owner_id = configured_owner_id()
-
     if not bool(settings.AUTH_ENABLED):
         return AuthenticatedPrincipal(
-            owner_id=owner_id,
+            owner_id=configured_owner_id(),
             authentication_method=(
                 "development_auth_disabled"
             ),
             token_fingerprint=None,
+            session_id=None,
         )
-
-    expected_token = _configured_token()
 
     if credentials is None:
         raise _authentication_error(
@@ -368,57 +535,186 @@ def require_principal(
             "Bearer authentication is required."
         )
 
-    supplied_token = (
-        credentials.credentials.strip()
+    return authenticate_bearer_token(
+        credentials.credentials
     )
 
-    if not supplied_token:
-        raise _authentication_error(
-            "Bearer token cannot be empty."
-        )
 
-    if not secrets.compare_digest(
-        supplied_token,
-        expected_token,
+@router.post(
+    "/register",
+    status_code=201,
+)
+def register_account(
+    payload: RegisterRequest,
+) -> dict[str, Any]:
+    if not bool(
+        settings.ACCOUNT_AUTH_ENABLED
     ):
-        detail = (
-            "Bearer token is invalid."
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Account authentication is disabled."
+            ),
         )
 
-        record_security_event_safely(
-            event_type="invalid_token",
-            severity="warning",
-            client_ref=(
-                "credential:"
-                + _token_fingerprint(
-                    supplied_token
-                )
+    try:
+        user = authentication_service.register(
+            email=payload.email,
+            password=payload.password,
+            display_name=(
+                payload.display_name
             ),
-            owner_id=owner_id,
-            status_code=(
-                status.HTTP_401_UNAUTHORIZED
-            ),
-            message=detail,
-            metadata={
-                "authentication_method": (
-                    "bearer_token"
-                ),
-            },
         )
 
+    except AccountExistsError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+        ) from exc
+
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    return {
+        "success": True,
+        "user": user,
+    }
+
+
+@router.post("/login")
+def login_account(
+    payload: LoginRequest,
+) -> dict[str, Any]:
+    if not bool(
+        settings.ACCOUNT_AUTH_ENABLED
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Account authentication is disabled."
+            ),
+        )
+
+    try:
+        token_bundle = authentication_service.login(
+            email=payload.email,
+            password=payload.password,
+            device_name=payload.device_name,
+            client_ref=payload.client_ref,
+        )
+
+    except InvalidCredentialsError as exc:
         raise _authentication_error(
-            detail
+            str(exc)
+        ) from exc
+
+    except AuthenticationConfigurationError as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+            ),
+            detail=str(exc),
+        ) from exc
+
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    return {
+        "success": True,
+        **token_bundle,
+    }
+
+
+@router.post("/refresh")
+def refresh_account_session(
+    payload: RefreshRequest,
+) -> dict[str, Any]:
+    if not bool(
+        settings.ACCOUNT_AUTH_ENABLED
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Account authentication is disabled."
+            ),
         )
 
-    return AuthenticatedPrincipal(
-        owner_id=owner_id,
-        authentication_method="bearer_token",
-        token_fingerprint=(
-            _token_fingerprint(
-                expected_token
+    try:
+        token_bundle = authentication_service.refresh(
+            refresh_token=(
+                payload.refresh_token
             )
-        ),
-    )
+        )
+
+    except InvalidRefreshTokenError as exc:
+        raise _authentication_error(
+            str(exc)
+        ) from exc
+
+    except AuthenticationConfigurationError as exc:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+            ),
+            detail=str(exc),
+        ) from exc
+
+    return {
+        "success": True,
+        **token_bundle,
+    }
+
+
+@router.post("/logout")
+def logout_account_session(
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_principal),
+    ],
+) -> dict[str, Any]:
+    if (
+        principal.authentication_method
+        != "account_access_token"
+        or principal.session_id is None
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "The static compatibility token "
+                "does not have a revocable session."
+            ),
+        )
+
+    try:
+        session = (
+            authentication_service.logout(
+                session_id=(
+                    principal.session_id
+                )
+            )
+        )
+
+    except KeyError as exc:
+        raise _authentication_error(
+            "Bearer token is invalid."
+        ) from exc
+
+    return {
+        "success": True,
+        "session": session,
+    }
 
 
 @router.get("/me")
@@ -428,8 +724,6 @@ def authenticated_identity(
         Depends(require_principal),
     ],
 ) -> dict[str, Any]:
-    """Return the verified principal without exposing credentials."""
-
     return {
         "success": True,
         "principal": jsonable_encoder(
@@ -440,9 +734,17 @@ def authenticated_identity(
 
 __all__ = [
     "AuthenticatedPrincipal",
+    "LoginRequest",
+    "RefreshRequest",
+    "RegisterRequest",
+    "authenticate_bearer_token",
     "authenticated_identity",
     "bearer_scheme",
     "configured_owner_id",
+    "login_account",
+    "logout_account_session",
+    "refresh_account_session",
+    "register_account",
     "require_principal",
     "require_resource_owner",
     "resolve_requested_owner",

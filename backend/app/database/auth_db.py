@@ -588,6 +588,115 @@ class SQLiteAuthenticationStore:
 
         return self._session_row_to_dict(row)
 
+
+    def rotate_refresh_token(
+        self,
+        *,
+        current_refresh_token: str,
+        new_refresh_token: str,
+        expires_in_seconds: int = 2592000,
+    ) -> dict[str, Any] | None:
+        """
+        Atomically rotate one active refresh token.
+
+        None is returned when the current token is unknown, expired,
+        revoked, or belongs to a non-active account.
+        """
+
+        current_fingerprint = fingerprint_refresh_token(
+            current_refresh_token
+        )
+        new_fingerprint = fingerprint_refresh_token(
+            new_refresh_token
+        )
+        expires_in_seconds = self._validate_session_expiry(
+            expires_in_seconds
+        )
+
+        if hmac.compare_digest(
+            current_fingerprint,
+            new_fingerprint,
+        ):
+            raise ValueError(
+                "The replacement refresh token must be different."
+            )
+
+        now = self._now()
+        now_text = now.isoformat()
+        expires_at = (
+            now
+            + timedelta(
+                seconds=expires_in_seconds
+            )
+        ).isoformat()
+
+        try:
+            with self._connection() as connection:
+                connection.execute(
+                    "BEGIN IMMEDIATE"
+                )
+                self._expire_sessions_locked(
+                    connection
+                )
+
+                row = connection.execute(
+                    f"""
+                    SELECT
+                        s.session_id,
+                        s.user_id
+                    FROM {SESSION_TABLE} AS s
+                    INNER JOIN {USER_TABLE} AS u
+                        ON u.user_id = s.user_id
+                    WHERE
+                        s.refresh_token_fingerprint = ?
+                        AND s.status = 'active'
+                        AND u.status = 'active'
+                    """,
+                    (
+                        current_fingerprint,
+                    ),
+                ).fetchone()
+
+                if row is None:
+                    return None
+
+                cursor = connection.execute(
+                    f"""
+                    UPDATE {SESSION_TABLE}
+                    SET
+                        refresh_token_fingerprint = ?,
+                        updated_at = ?,
+                        last_seen_at = ?,
+                        expires_at = ?
+                    WHERE
+                        session_id = ?
+                        AND refresh_token_fingerprint = ?
+                        AND status = 'active'
+                    """,
+                    (
+                        new_fingerprint,
+                        now_text,
+                        now_text,
+                        expires_at,
+                        row["session_id"],
+                        current_fingerprint,
+                    ),
+                )
+
+                if cursor.rowcount != 1:
+                    return None
+
+                session_id = row["session_id"]
+
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(
+                "The replacement refresh token is already registered."
+            ) from exc
+
+        return self.get_session(
+            session_id
+        )
+
     def touch_session(self, session_id: str) -> dict[str, Any]:
         session_id = self._validate_text(session_id, "Session ID", 128)
         now_text = self._now().isoformat()

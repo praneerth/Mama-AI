@@ -133,6 +133,34 @@ AUTH_TOKEN = os.getenv(
 AUTH_MINIMUM_TOKEN_LENGTH = 32
 
 
+ACCOUNT_AUTH_ENABLED = _environment_bool(
+    "MAMA_ACCOUNT_AUTH_ENABLED",
+    True,
+)
+
+AUTH_STATIC_COMPATIBILITY_ENABLED = _environment_bool(
+    "MAMA_STATIC_TOKEN_COMPATIBILITY_ENABLED",
+    True,
+)
+
+# This secret signs short-lived account access tokens. It must be
+# independent from MAMA_API_TOKEN and must never be logged.
+AUTH_SIGNING_SECRET = os.getenv(
+    "MAMA_AUTH_SIGNING_SECRET",
+    "",
+).strip()
+
+AUTH_ACCESS_TOKEN_SECONDS = _environment_int(
+    "MAMA_AUTH_ACCESS_TOKEN_SECONDS",
+    900,
+)
+
+AUTH_REFRESH_TOKEN_SECONDS = _environment_int(
+    "MAMA_AUTH_REFRESH_TOKEN_SECONDS",
+    2592000,
+)
+
+
 # =====================================================
 # Rate Limiting and Authentication-Abuse Protection
 # =====================================================
