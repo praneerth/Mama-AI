@@ -314,7 +314,12 @@ class SQLiteAuthenticationStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     last_login_at TEXT,
-                    email_verified_at TEXT
+                    email_verified_at TEXT,
+                    failed_login_count INTEGER NOT NULL DEFAULT 0
+                        CHECK (failed_login_count >= 0),
+                    failed_login_window_started_at TEXT,
+                    last_failed_login_at TEXT,
+                    locked_until TEXT
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_user_accounts_status
@@ -382,6 +387,44 @@ class SQLiteAuthenticationStore:
                 column_name="email_verified_at",
                 column_definition="TEXT",
             )
+            self._ensure_column_locked(
+                connection,
+                table_name=USER_TABLE,
+                column_name="failed_login_count",
+                column_definition=(
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+            )
+            self._ensure_column_locked(
+                connection,
+                table_name=USER_TABLE,
+                column_name=(
+                    "failed_login_window_started_at"
+                ),
+                column_definition="TEXT",
+            )
+            self._ensure_column_locked(
+                connection,
+                table_name=USER_TABLE,
+                column_name="last_failed_login_at",
+                column_definition="TEXT",
+            )
+            self._ensure_column_locked(
+                connection,
+                table_name=USER_TABLE,
+                column_name="locked_until",
+                column_definition="TEXT",
+            )
+            connection.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS
+                    idx_user_accounts_lockout
+                ON {USER_TABLE}(
+                    status,
+                    locked_until
+                )
+                """
+            )
 
     def create_user(
         self,
@@ -442,6 +485,10 @@ class SQLiteAuthenticationStore:
         user_id = self._validate_text(user_id, "User ID", 128)
 
         with self._connection() as connection:
+            self._unlock_expired_user_locks_locked(
+                connection,
+                user_id=user_id,
+            )
             row = connection.execute(
                 f"SELECT * FROM {USER_TABLE} WHERE user_id = ?",
                 (user_id,),
@@ -453,6 +500,10 @@ class SQLiteAuthenticationStore:
         normalized_email = normalize_email(email)
 
         with self._connection() as connection:
+            self._unlock_expired_user_locks_locked(
+                connection,
+                email=normalized_email,
+            )
             row = connection.execute(
                 f"SELECT * FROM {USER_TABLE} WHERE email = ?",
                 (normalized_email,),
@@ -464,6 +515,10 @@ class SQLiteAuthenticationStore:
         normalized_email = normalize_email(email)
 
         with self._connection() as connection:
+            self._unlock_expired_user_locks_locked(
+                connection,
+                email=normalized_email,
+            )
             row = connection.execute(
                 f"SELECT password_hash, status FROM {USER_TABLE} WHERE email = ?",
                 (normalized_email,),
@@ -474,6 +529,305 @@ class SQLiteAuthenticationStore:
 
         return verify_password_hash(password, row["password_hash"])
 
+
+    def get_login_protection_state(
+        self,
+        email: str,
+    ) -> dict[str, Any] | None:
+        """Return account login-protection state without password data."""
+
+        normalized_email = normalize_email(
+            email
+        )
+        now = self._now()
+
+        with self._connection() as connection:
+            self._unlock_expired_user_locks_locked(
+                connection,
+                email=normalized_email,
+            )
+            row = connection.execute(
+                f"""
+                SELECT
+                    user_id,
+                    status,
+                    failed_login_count,
+                    failed_login_window_started_at,
+                    last_failed_login_at,
+                    locked_until
+                FROM {USER_TABLE}
+                WHERE email = ?
+                """,
+                (
+                    normalized_email,
+                ),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        retry_after_seconds = 0
+        locked_until = row["locked_until"]
+
+        if (
+            row["status"] == "locked"
+            and locked_until
+        ):
+            try:
+                unlock_at = datetime.fromisoformat(
+                    locked_until
+                )
+                if unlock_at.tzinfo is None:
+                    unlock_at = unlock_at.replace(
+                        tzinfo=timezone.utc
+                    )
+                retry_after_seconds = max(
+                    0,
+                    int(
+                        (
+                            unlock_at.astimezone(
+                                timezone.utc
+                            )
+                            - now
+                        ).total_seconds()
+                    ),
+                )
+            except (TypeError, ValueError):
+                retry_after_seconds = 0
+
+        return {
+            "user_id": row["user_id"],
+            "status": row["status"],
+            "failed_login_count": int(
+                row["failed_login_count"] or 0
+            ),
+            "failed_login_window_started_at": (
+                row["failed_login_window_started_at"]
+            ),
+            "last_failed_login_at": (
+                row["last_failed_login_at"]
+            ),
+            "locked_until": locked_until,
+            "retry_after_seconds": (
+                retry_after_seconds
+            ),
+        }
+
+    def record_login_failure(
+        self,
+        *,
+        email: str,
+        failure_limit: int,
+        failure_window_seconds: int,
+        lockout_seconds: int,
+    ) -> dict[str, Any] | None:
+        """Atomically record one failed login and start lockout when due."""
+
+        normalized_email = normalize_email(
+            email
+        )
+        self._validate_login_protection_parameters(
+            failure_limit=failure_limit,
+            failure_window_seconds=(
+                failure_window_seconds
+            ),
+            lockout_seconds=lockout_seconds,
+        )
+        now = self._now()
+        now_text = now.isoformat()
+
+        with self._connection() as connection:
+            connection.execute(
+                "BEGIN IMMEDIATE"
+            )
+            self._unlock_expired_user_locks_locked(
+                connection,
+                email=normalized_email,
+            )
+            row = connection.execute(
+                f"""
+                SELECT
+                    user_id,
+                    status,
+                    failed_login_count,
+                    failed_login_window_started_at,
+                    locked_until
+                FROM {USER_TABLE}
+                WHERE email = ?
+                """,
+                (
+                    normalized_email,
+                ),
+            ).fetchone()
+
+            if row is None:
+                return None
+
+            if row["status"] != "active":
+                locked_until = row["locked_until"]
+                retry_after_seconds = 0
+
+                if (
+                    row["status"] == "locked"
+                    and locked_until
+                ):
+                    try:
+                        unlock_at = datetime.fromisoformat(
+                            locked_until
+                        )
+                        if unlock_at.tzinfo is None:
+                            unlock_at = unlock_at.replace(
+                                tzinfo=timezone.utc
+                            )
+                        retry_after_seconds = max(
+                            0,
+                            int(
+                                (
+                                    unlock_at.astimezone(
+                                        timezone.utc
+                                    )
+                                    - now
+                                ).total_seconds()
+                            ),
+                        )
+                    except (TypeError, ValueError):
+                        retry_after_seconds = 0
+
+                return {
+                    "user_id": row["user_id"],
+                    "status": row["status"],
+                    "failed_login_count": int(
+                        row["failed_login_count"] or 0
+                    ),
+                    "failed_login_window_started_at": (
+                        row["failed_login_window_started_at"]
+                    ),
+                    "last_failed_login_at": now_text,
+                    "locked_until": locked_until,
+                    "retry_after_seconds": (
+                        retry_after_seconds
+                    ),
+                    "lockout_started": False,
+                    "already_locked": (
+                        row["status"] == "locked"
+                    ),
+                }
+
+            previous_count = int(
+                row["failed_login_count"] or 0
+            )
+            window_started_at = (
+                row["failed_login_window_started_at"]
+            )
+            inside_window = False
+
+            if window_started_at:
+                try:
+                    window_start = datetime.fromisoformat(
+                        window_started_at
+                    )
+                    if window_start.tzinfo is None:
+                        window_start = window_start.replace(
+                            tzinfo=timezone.utc
+                        )
+                    inside_window = (
+                        now
+                        < window_start.astimezone(
+                            timezone.utc
+                        )
+                        + timedelta(
+                            seconds=(
+                                failure_window_seconds
+                            )
+                        )
+                    )
+                except (TypeError, ValueError):
+                    inside_window = False
+
+            if inside_window:
+                failure_count = previous_count + 1
+                new_window_start = window_started_at
+            else:
+                failure_count = 1
+                new_window_start = now_text
+
+            lockout_started = (
+                failure_count >= failure_limit
+            )
+            locked_until = None
+            new_status = "active"
+
+            if lockout_started:
+                new_status = "locked"
+                locked_until = (
+                    now
+                    + timedelta(
+                        seconds=lockout_seconds
+                    )
+                ).isoformat()
+
+            connection.execute(
+                f"""
+                UPDATE {USER_TABLE}
+                SET
+                    status = ?,
+                    failed_login_count = ?,
+                    failed_login_window_started_at = ?,
+                    last_failed_login_at = ?,
+                    locked_until = ?,
+                    updated_at = ?
+                WHERE user_id = ?
+                """,
+                (
+                    new_status,
+                    failure_count,
+                    new_window_start,
+                    now_text,
+                    locked_until,
+                    now_text,
+                    row["user_id"],
+                ),
+            )
+
+            if lockout_started:
+                connection.execute(
+                    f"""
+                    UPDATE {SESSION_TABLE}
+                    SET
+                        status = 'revoked',
+                        updated_at = ?,
+                        revoked_at = COALESCE(
+                            revoked_at,
+                            ?
+                        )
+                    WHERE
+                        user_id = ?
+                        AND status = 'active'
+                    """,
+                    (
+                        now_text,
+                        now_text,
+                        row["user_id"],
+                    ),
+                )
+
+        return {
+            "user_id": row["user_id"],
+            "status": new_status,
+            "failed_login_count": failure_count,
+            "failed_login_window_started_at": (
+                new_window_start
+            ),
+            "last_failed_login_at": now_text,
+            "locked_until": locked_until,
+            "retry_after_seconds": (
+                lockout_seconds
+                if lockout_started
+                else 0
+            ),
+            "lockout_started": lockout_started,
+            "already_locked": False,
+        }
 
     def change_password(
         self,
@@ -615,7 +969,13 @@ class SQLiteAuthenticationStore:
             cursor = connection.execute(
                 f"""
                 UPDATE {USER_TABLE}
-                SET status = ?, updated_at = ?
+                SET
+                    status = ?,
+                    failed_login_count = 0,
+                    failed_login_window_started_at = NULL,
+                    last_failed_login_at = NULL,
+                    locked_until = NULL,
+                    updated_at = ?
                 WHERE user_id = ?
                 """,
                 (status, now_text, user_id),
@@ -652,7 +1012,13 @@ class SQLiteAuthenticationStore:
             cursor = connection.execute(
                 f"""
                 UPDATE {USER_TABLE}
-                SET last_login_at = ?, updated_at = ?
+                SET
+                    last_login_at = ?,
+                    failed_login_count = 0,
+                    failed_login_window_started_at = NULL,
+                    last_failed_login_at = NULL,
+                    locked_until = NULL,
+                    updated_at = ?
                 WHERE user_id = ? AND status = 'active'
                 """,
                 (now_text, now_text, user_id),
@@ -703,10 +1069,18 @@ class SQLiteAuthenticationStore:
                 f"User account was not found: {user_id}"
             )
 
-        if user["status"] != "active":
+        token_allowed = (
+            user["status"] == "active"
+            or (
+                purpose == "password_reset"
+                and user["status"] == "locked"
+            )
+        )
+
+        if not token_allowed:
             raise PermissionError(
-                "Account action tokens can be created only "
-                "for active user accounts."
+                "Account action tokens cannot be created "
+                "for this user account."
             )
 
         token_id = uuid4().hex
@@ -1012,7 +1386,7 @@ class SQLiteAuthenticationStore:
                     t.token_fingerprint = ?
                     AND t.purpose = 'password_reset'
                     AND t.status = 'active'
-                    AND u.status = 'active'
+                    AND u.status IN ('active', 'locked')
                 """,
                 (
                     fingerprint,
@@ -1048,6 +1422,11 @@ class SQLiteAuthenticationStore:
                 UPDATE {USER_TABLE}
                 SET
                     password_hash = ?,
+                    status = 'active',
+                    failed_login_count = 0,
+                    failed_login_window_started_at = NULL,
+                    last_failed_login_at = NULL,
+                    locked_until = NULL,
                     updated_at = ?
                 WHERE user_id = ?
                 """,
@@ -1703,6 +2082,61 @@ class SQLiteAuthenticationStore:
             connection.execute(f"DELETE FROM {SESSION_TABLE}")
             connection.execute(f"DELETE FROM {USER_TABLE}")
 
+
+    def _unlock_expired_user_locks_locked(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        user_id: str | None = None,
+        email: str | None = None,
+    ) -> int:
+        conditions = [
+            "status = 'locked'",
+            "locked_until IS NOT NULL",
+            "locked_until <= ?",
+        ]
+        parameters: list[Any] = [
+            self._now().isoformat()
+        ]
+
+        if user_id is not None:
+            conditions.append(
+                "user_id = ?"
+            )
+            parameters.append(
+                user_id
+            )
+
+        if email is not None:
+            conditions.append(
+                "email = ?"
+            )
+            parameters.append(
+                email
+            )
+
+        now_text = parameters[0]
+        cursor = connection.execute(
+            f"""
+            UPDATE {USER_TABLE}
+            SET
+                status = 'active',
+                failed_login_count = 0,
+                failed_login_window_started_at = NULL,
+                last_failed_login_at = NULL,
+                locked_until = NULL,
+                updated_at = ?
+            WHERE {" AND ".join(conditions)}
+            """,
+            tuple(
+                [now_text]
+                + parameters
+            ),
+        )
+        return int(
+            cursor.rowcount
+        )
+
     def _expire_account_action_tokens_locked(
         self,
         connection: sqlite3.Connection,
@@ -1952,6 +2386,50 @@ class SQLiteAuthenticationStore:
             )
 
         return expires_in_seconds
+
+
+    @staticmethod
+    def _validate_login_protection_parameters(
+        *,
+        failure_limit: int,
+        failure_window_seconds: int,
+        lockout_seconds: int,
+    ) -> None:
+        values = (
+            (
+                failure_limit,
+                "Failure limit",
+                2,
+                100,
+            ),
+            (
+                failure_window_seconds,
+                "Failure window",
+                60,
+                86400,
+            ),
+            (
+                lockout_seconds,
+                "Lockout duration",
+                60,
+                604800,
+            ),
+        )
+
+        for value, label, minimum, maximum in values:
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+            ):
+                raise TypeError(
+                    f"{label} must be an integer."
+                )
+
+            if not minimum <= value <= maximum:
+                raise ValueError(
+                    f"{label} must be between "
+                    f"{minimum} and {maximum}."
+                )
 
     @staticmethod
     def _validate_session_expiry(expires_in_seconds: int) -> int:

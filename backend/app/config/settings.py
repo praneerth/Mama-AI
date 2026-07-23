@@ -219,6 +219,33 @@ AUTH_SMTP_TIMEOUT_SECONDS = _environment_int(
 
 
 # =====================================================
+# Account Login Protection
+# =====================================================
+
+AUTH_ACCOUNT_LOCKOUT_ENABLED = _environment_bool(
+    "MAMA_AUTH_ACCOUNT_LOCKOUT_ENABLED",
+    True,
+)
+
+AUTH_ACCOUNT_FAILURE_LIMIT = _environment_int(
+    "MAMA_AUTH_ACCOUNT_FAILURE_LIMIT",
+    5,
+    minimum=2,
+)
+
+AUTH_ACCOUNT_FAILURE_WINDOW_SECONDS = _environment_int(
+    "MAMA_AUTH_ACCOUNT_FAILURE_WINDOW_SECONDS",
+    900,
+    minimum=60,
+)
+
+AUTH_ACCOUNT_LOCKOUT_SECONDS = _environment_int(
+    "MAMA_AUTH_ACCOUNT_LOCKOUT_SECONDS",
+    900,
+    minimum=60,
+)
+
+# =====================================================
 # Rate Limiting and Authentication-Abuse Protection
 # =====================================================
 

@@ -18,6 +18,16 @@ from app.core.auth_tokens import (
 from app.database.auth_db import (
     SQLiteAuthenticationStore,
     authentication_store,
+    hash_password,
+    verify_password_hash,
+)
+
+
+_DUMMY_PASSWORD = (
+    "Mama-AI-Dummy-Password-Verification-2026"
+)
+_DUMMY_PASSWORD_HASH = hash_password(
+    _DUMMY_PASSWORD
 )
 
 
@@ -42,7 +52,34 @@ class AccountExistsError(
 class InvalidCredentialsError(
     AuthenticationServiceError
 ):
-    """Email/password authentication failed."""
+    """Email/password authentication failed without revealing account state."""
+
+    def __init__(
+        self,
+        message: str = (
+            "Email or password is invalid."
+        ),
+        *,
+        user_id: str | None = None,
+        failure_count: int | None = None,
+        account_locked: bool = False,
+        lockout_started: bool = False,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        super().__init__(
+            message
+        )
+        self.user_id = user_id
+        self.failure_count = failure_count
+        self.account_locked = bool(
+            account_locked
+        )
+        self.lockout_started = bool(
+            lockout_started
+        )
+        self.retry_after_seconds = (
+            retry_after_seconds
+        )
 
 
 class InvalidRefreshTokenError(
@@ -96,6 +133,10 @@ class AuthenticationService:
         refresh_token_seconds: int | None = None,
         email_verification_token_seconds: int | None = None,
         password_reset_token_seconds: int | None = None,
+        account_lockout_enabled: bool | None = None,
+        account_failure_limit: int | None = None,
+        account_failure_window_seconds: int | None = None,
+        account_lockout_seconds: int | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._store = store
@@ -113,6 +154,18 @@ class AuthenticationService:
         )
         self._explicit_password_reset_seconds = (
             password_reset_token_seconds
+        )
+        self._explicit_account_lockout_enabled = (
+            account_lockout_enabled
+        )
+        self._explicit_account_failure_limit = (
+            account_failure_limit
+        )
+        self._explicit_account_failure_window_seconds = (
+            account_failure_window_seconds
+        )
+        self._explicit_account_lockout_seconds = (
+            account_lockout_seconds
         )
         self._clock = (
             clock
@@ -154,29 +207,123 @@ class AuthenticationService:
         device_name: str | None = None,
         client_ref: str | None = None,
     ) -> dict[str, Any]:
+        generic_message = (
+            "Email or password is invalid."
+        )
+        candidate_password = (
+            password
+            if (
+                isinstance(password, str)
+                and 12 <= len(password) <= 1024
+            )
+            else _DUMMY_PASSWORD
+        )
+
         try:
             user = self._store.get_user_by_email(
                 email
             )
-            valid = (
-                user is not None
-                and self._store.verify_user_password(
-                    email=email,
-                    password=password,
+            protection = (
+                self._store.get_login_protection_state(
+                    email
                 )
+                if user is not None
+                else None
             )
 
         except (
             TypeError,
             ValueError,
         ) as exc:
+            verify_password_hash(
+                candidate_password,
+                _DUMMY_PASSWORD_HASH,
+            )
             raise InvalidCredentialsError(
-                "Email or password is invalid."
+                generic_message
             ) from exc
 
-        if not valid or user is None:
+        if user is None:
+            verify_password_hash(
+                candidate_password,
+                _DUMMY_PASSWORD_HASH,
+            )
             raise InvalidCredentialsError(
-                "Email or password is invalid."
+                generic_message
+            )
+
+        if (
+            protection is None
+            or protection["status"] != "active"
+        ):
+            verify_password_hash(
+                candidate_password,
+                _DUMMY_PASSWORD_HASH,
+            )
+            locked = bool(
+                protection is not None
+                and protection["status"] == "locked"
+            )
+            raise InvalidCredentialsError(
+                generic_message,
+                user_id=user["user_id"],
+                failure_count=(
+                    protection["failed_login_count"]
+                    if protection is not None
+                    else None
+                ),
+                account_locked=locked,
+                lockout_started=False,
+                retry_after_seconds=(
+                    protection["retry_after_seconds"]
+                    if protection is not None
+                    else None
+                ),
+            )
+
+        valid = self._store.verify_user_password(
+            email=email,
+            password=candidate_password,
+        )
+
+        if not valid:
+            failure = None
+
+            if self._account_lockout_enabled():
+                failure = self._store.record_login_failure(
+                    email=email,
+                    failure_limit=(
+                        self._account_failure_limit()
+                    ),
+                    failure_window_seconds=(
+                        self._account_failure_window_seconds()
+                    ),
+                    lockout_seconds=(
+                        self._account_lockout_seconds()
+                    ),
+                )
+
+            raise InvalidCredentialsError(
+                generic_message,
+                user_id=user["user_id"],
+                failure_count=(
+                    failure["failed_login_count"]
+                    if failure is not None
+                    else None
+                ),
+                account_locked=bool(
+                    failure is not None
+                    and failure["status"] == "locked"
+                ),
+                lockout_started=bool(
+                    failure is not None
+                    and failure["lockout_started"]
+                ),
+                retry_after_seconds=(
+                    failure["retry_after_seconds"]
+                    if failure is not None
+                    else None
+                ),
             )
 
         refresh_token = self._new_refresh_token()
@@ -436,7 +583,10 @@ class AuthenticationService:
 
         if (
             user is None
-            or user["status"] != "active"
+            or user["status"] not in {
+                "active",
+                "locked",
+            }
         ):
             return None
 
@@ -699,6 +849,85 @@ class AuthenticationService:
         if not 60 <= value <= 604800:
             raise AuthenticationConfigurationError(
                 "Password-reset token expiry must be between "
+                "60 and 604800 seconds."
+            )
+
+        return value
+
+
+    def _account_lockout_enabled(
+        self,
+    ) -> bool:
+        value = (
+            self._explicit_account_lockout_enabled
+            if self._explicit_account_lockout_enabled
+            is not None
+            else bool(
+                settings.AUTH_ACCOUNT_LOCKOUT_ENABLED
+            )
+        )
+
+        if not isinstance(value, bool):
+            raise AuthenticationConfigurationError(
+                "Account lockout enabled must be boolean."
+            )
+
+        return value
+
+    def _account_failure_limit(
+        self,
+    ) -> int:
+        value = (
+            self._explicit_account_failure_limit
+            if self._explicit_account_failure_limit
+            is not None
+            else int(
+                settings.AUTH_ACCOUNT_FAILURE_LIMIT
+            )
+        )
+
+        if not 2 <= value <= 100:
+            raise AuthenticationConfigurationError(
+                "Account failure limit must be between 2 and 100."
+            )
+
+        return value
+
+    def _account_failure_window_seconds(
+        self,
+    ) -> int:
+        value = (
+            self._explicit_account_failure_window_seconds
+            if self._explicit_account_failure_window_seconds
+            is not None
+            else int(
+                settings.AUTH_ACCOUNT_FAILURE_WINDOW_SECONDS
+            )
+        )
+
+        if not 60 <= value <= 86400:
+            raise AuthenticationConfigurationError(
+                "Account failure window must be between "
+                "60 and 86400 seconds."
+            )
+
+        return value
+
+    def _account_lockout_seconds(
+        self,
+    ) -> int:
+        value = (
+            self._explicit_account_lockout_seconds
+            if self._explicit_account_lockout_seconds
+            is not None
+            else int(
+                settings.AUTH_ACCOUNT_LOCKOUT_SECONDS
+            )
+        )
+
+        if not 60 <= value <= 604800:
+            raise AuthenticationConfigurationError(
+                "Account lockout duration must be between "
                 "60 and 604800 seconds."
             )
 

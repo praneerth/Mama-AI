@@ -302,6 +302,106 @@ def _record_invalid_token(
     )
 
 
+
+
+def _account_reference(
+    email: str,
+) -> str:
+    normalized = (
+        str(email).strip().casefold()
+    )
+    digest = hashlib.sha256(
+        (
+            "mama-ai:account-login:"
+            + normalized
+        ).encode("utf-8")
+    ).hexdigest()
+
+    return "account:" + digest[:12]
+
+
+def _record_account_login_failure(
+    *,
+    email: str,
+    error: InvalidCredentialsError,
+) -> None:
+    metadata = {
+        "scope": "account_login",
+        "failure_count": (
+            error.failure_count
+        ),
+        "account_locked": (
+            error.account_locked
+        ),
+        "lockout_started": (
+            error.lockout_started
+        ),
+    }
+    client_ref = _account_reference(
+        email
+    )
+
+    record_security_event_safely(
+        event_type="authentication_failed",
+        severity="warning",
+        client_ref=client_ref,
+        owner_id=error.user_id,
+        request_method="POST",
+        request_path="/auth/login",
+        status_code=(
+            status.HTTP_401_UNAUTHORIZED
+        ),
+        message=(
+            "Account login failed."
+        ),
+        metadata=metadata,
+    )
+
+    if error.lockout_started:
+        record_security_event_safely(
+            event_type=(
+                "authentication_cooldown_started"
+            ),
+            severity="warning",
+            client_ref=client_ref,
+            owner_id=error.user_id,
+            request_method="POST",
+            request_path="/auth/login",
+            status_code=(
+                status.HTTP_401_UNAUTHORIZED
+            ),
+            retry_after_seconds=(
+                error.retry_after_seconds
+            ),
+            message=(
+                "Account login lockout started."
+            ),
+            metadata=metadata,
+        )
+
+    elif error.account_locked:
+        record_security_event_safely(
+            event_type=(
+                "authentication_cooldown_blocked"
+            ),
+            severity="warning",
+            client_ref=client_ref,
+            owner_id=error.user_id,
+            request_method="POST",
+            request_path="/auth/login",
+            status_code=(
+                status.HTTP_401_UNAUTHORIZED
+            ),
+            retry_after_seconds=(
+                error.retry_after_seconds
+            ),
+            message=(
+                "Account login blocked by lockout."
+            ),
+            metadata=metadata,
+        )
+
+
 def authenticate_bearer_token(
     token: str,
     *,
@@ -664,8 +764,12 @@ def login_account(
         )
 
     except InvalidCredentialsError as exc:
+        _record_account_login_failure(
+            email=payload.email,
+            error=exc,
+        )
         raise _authentication_error(
-            str(exc)
+            "Email or password is invalid."
         ) from exc
 
     except AuthenticationConfigurationError as exc:
