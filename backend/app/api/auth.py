@@ -35,7 +35,9 @@ from app.core.auth_service import (
     AuthenticationConfigurationError,
     InvalidAccountAccessTokenError,
     InvalidCredentialsError,
+    InvalidCurrentPasswordError,
     InvalidRefreshTokenError,
+    SessionNotFoundError,
     authentication_service,
 )
 from app.core.auth_tokens import TOKEN_PREFIX
@@ -95,6 +97,11 @@ class LoginRequest(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 
 def _authentication_error(
@@ -386,6 +393,27 @@ def authenticate_bearer_token(
         "Bearer token is invalid."
     )
 
+
+
+
+def _require_account_principal(
+    principal: AuthenticatedPrincipal,
+) -> AuthenticatedPrincipal:
+    if (
+        principal.authentication_method
+        != "account_access_token"
+        or principal.session_id is None
+    ):
+        raise HTTPException(
+            status_code=(
+                status.HTTP_403_FORBIDDEN
+            ),
+            detail=(
+                "An account access token is required."
+            ),
+        )
+
+    return principal
 
 def resolve_requested_owner(
     requested_owner_id: str | None,
@@ -723,6 +751,142 @@ def logout_account_session(
     }
 
 
+
+
+@router.get("/sessions")
+def list_account_sessions(
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_principal),
+    ],
+) -> dict[str, Any]:
+    principal = _require_account_principal(
+        principal
+    )
+    sessions = authentication_service.list_sessions(
+        user_id=principal.owner_id,
+        limit=100,
+    )
+
+    return {
+        "success": True,
+        "current_session_id": (
+            principal.session_id
+        ),
+        "sessions": [
+            {
+                **session,
+                "is_current": secrets.compare_digest(
+                    session["session_id"],
+                    principal.session_id,
+                ),
+            }
+            for session in sessions
+        ],
+    }
+
+
+@router.delete("/sessions/{session_id}")
+def revoke_account_session(
+    session_id: str,
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_principal),
+    ],
+) -> dict[str, Any]:
+    principal = _require_account_principal(
+        principal
+    )
+
+    try:
+        session = (
+            authentication_service.revoke_user_session(
+                user_id=principal.owner_id,
+                session_id=session_id,
+            )
+        )
+
+    except SessionNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Authentication session was not found."
+            ),
+        ) from exc
+
+    return {
+        "success": True,
+        "session": session,
+    }
+
+
+@router.post("/logout-all")
+def logout_all_account_sessions(
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_principal),
+    ],
+) -> dict[str, Any]:
+    principal = _require_account_principal(
+        principal
+    )
+    revoked_sessions = (
+        authentication_service.logout_all(
+            user_id=principal.owner_id
+        )
+    )
+
+    return {
+        "success": True,
+        "revoked_sessions": revoked_sessions,
+    }
+
+
+@router.post("/change-password")
+def change_account_password(
+    payload: ChangePasswordRequest,
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_principal),
+    ],
+) -> dict[str, Any]:
+    principal = _require_account_principal(
+        principal
+    )
+
+    try:
+        result = authentication_service.change_password(
+            user_id=principal.owner_id,
+            current_password=(
+                payload.current_password
+            ),
+            new_password=payload.new_password,
+        )
+
+    except InvalidCurrentPasswordError as exc:
+        raise _authentication_error(
+            str(exc)
+        ) from exc
+
+    except KeyError as exc:
+        raise _authentication_error(
+            "Bearer token is invalid."
+        ) from exc
+
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    return {
+        "success": True,
+        **result,
+    }
+
 @router.get("/me")
 def authenticated_identity(
     principal: Annotated[
@@ -740,16 +904,21 @@ def authenticated_identity(
 
 __all__ = [
     "AuthenticatedPrincipal",
+    "ChangePasswordRequest",
     "LoginRequest",
     "RefreshRequest",
     "RegisterRequest",
     "authenticate_bearer_token",
     "authenticated_identity",
     "bearer_scheme",
+    "change_account_password",
     "configured_owner_id",
     "login_account",
+    "list_account_sessions",
     "logout_account_session",
+    "logout_all_account_sessions",
     "refresh_account_session",
+    "revoke_account_session",
     "register_account",
     "require_principal",
     "require_resource_owner",

@@ -382,6 +382,138 @@ class SQLiteAuthenticationStore:
 
         return verify_password_hash(password, row["password_hash"])
 
+
+    def change_password(
+        self,
+        *,
+        user_id: str,
+        current_password: str,
+        new_password: str,
+    ) -> dict[str, Any]:
+        """
+        Atomically replace one account password and revoke all sessions.
+
+        The current password is verified inside the same transaction used
+        to replace the stored hash and revoke active sessions.
+        """
+
+        user_id = self._validate_text(
+            user_id,
+            "User ID",
+            128,
+        )
+
+        if not isinstance(
+            current_password,
+            str,
+        ):
+            raise PermissionError(
+                "Current password is invalid."
+            )
+
+        if not isinstance(
+            new_password,
+            str,
+        ):
+            raise TypeError(
+                "New password must be text."
+            )
+
+        if secrets.compare_digest(
+            current_password,
+            new_password,
+        ):
+            raise ValueError(
+                "New password must be different "
+                "from the current password."
+            )
+
+        new_password_hash = hash_password(
+            new_password
+        )
+        now_text = self._now().isoformat()
+
+        with self._connection() as connection:
+            connection.execute(
+                "BEGIN IMMEDIATE"
+            )
+            row = connection.execute(
+                f"""
+                SELECT password_hash, status
+                FROM {USER_TABLE}
+                WHERE user_id = ?
+                """,
+                (
+                    user_id,
+                ),
+            ).fetchone()
+
+            if row is None:
+                raise KeyError(
+                    f"User account was not found: {user_id}"
+                )
+
+            if (
+                row["status"] != "active"
+                or not verify_password_hash(
+                    current_password,
+                    row["password_hash"],
+                )
+            ):
+                raise PermissionError(
+                    "Current password is invalid."
+                )
+
+            connection.execute(
+                f"""
+                UPDATE {USER_TABLE}
+                SET
+                    password_hash = ?,
+                    updated_at = ?
+                WHERE user_id = ?
+                """,
+                (
+                    new_password_hash,
+                    now_text,
+                    user_id,
+                ),
+            )
+
+            revoked_cursor = connection.execute(
+                f"""
+                UPDATE {SESSION_TABLE}
+                SET
+                    status = 'revoked',
+                    updated_at = ?,
+                    revoked_at = ?
+                WHERE
+                    user_id = ?
+                    AND status = 'active'
+                """,
+                (
+                    now_text,
+                    now_text,
+                    user_id,
+                ),
+            )
+            revoked_sessions = int(
+                revoked_cursor.rowcount
+            )
+
+        user = self.get_user(
+            user_id
+        )
+
+        if user is None:
+            raise RuntimeError(
+                "Updated user account could not be loaded."
+            )
+
+        return {
+            "user": user,
+            "revoked_sessions": revoked_sessions,
+        }
+
     def set_user_status(self, *, user_id: str, status: str) -> dict[str, Any]:
         user_id = self._validate_text(user_id, "User ID", 128)
         status = self._validate_user_status(status)
@@ -758,6 +890,87 @@ class SQLiteAuthenticationStore:
         if updated is None:
             raise RuntimeError(
                 "Revoked authentication session could not be loaded."
+            )
+
+        return updated
+
+
+    def revoke_user_session(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+    ) -> dict[str, Any]:
+        """
+        Revoke one session only when it belongs to the supplied user.
+
+        A missing session and another user's session intentionally produce
+        the same KeyError so callers cannot enumerate session ownership.
+        """
+
+        user_id = self._validate_text(
+            user_id,
+            "User ID",
+            128,
+        )
+        session_id = self._validate_text(
+            session_id,
+            "Session ID",
+            128,
+        )
+        now_text = self._now().isoformat()
+
+        with self._connection() as connection:
+            self._expire_sessions_locked(
+                connection
+            )
+            row = connection.execute(
+                f"""
+                SELECT status
+                FROM {SESSION_TABLE}
+                WHERE
+                    session_id = ?
+                    AND user_id = ?
+                """,
+                (
+                    session_id,
+                    user_id,
+                ),
+            ).fetchone()
+
+            if row is None:
+                raise KeyError(
+                    "Authentication session was not found."
+                )
+
+            if row["status"] == "active":
+                connection.execute(
+                    f"""
+                    UPDATE {SESSION_TABLE}
+                    SET
+                        status = 'revoked',
+                        updated_at = ?,
+                        revoked_at = ?
+                    WHERE
+                        session_id = ?
+                        AND user_id = ?
+                    """,
+                    (
+                        now_text,
+                        now_text,
+                        session_id,
+                        user_id,
+                    ),
+                )
+
+        updated = self.get_session(
+            session_id
+        )
+
+        if updated is None:
+            raise RuntimeError(
+                "Revoked authentication session "
+                "could not be loaded."
             )
 
         return updated

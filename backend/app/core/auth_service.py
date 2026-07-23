@@ -51,6 +51,19 @@ class InvalidRefreshTokenError(
     """Refresh-token authentication failed."""
 
 
+
+
+class SessionNotFoundError(
+    AuthenticationServiceError
+):
+    """A requested account session was not found for the user."""
+
+
+class InvalidCurrentPasswordError(
+    AuthenticationServiceError
+):
+    """The supplied current password could not be verified."""
+
 class InvalidAccountAccessTokenError(
     AuthenticationServiceError
 ):
@@ -254,6 +267,65 @@ class AuthenticationService:
             session_id
         )
 
+
+    def list_sessions(
+        self,
+        *,
+        user_id: str,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        return self._store.list_sessions(
+            user_id=user_id,
+            status=status,
+            limit=limit,
+        )
+
+    def revoke_user_session(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+    ) -> dict[str, Any]:
+        try:
+            return self._store.revoke_user_session(
+                user_id=user_id,
+                session_id=session_id,
+            )
+
+        except KeyError as exc:
+            raise SessionNotFoundError(
+                "Authentication session was not found."
+            ) from exc
+
+    def logout_all(
+        self,
+        *,
+        user_id: str,
+    ) -> int:
+        return self._store.revoke_all_sessions(
+            user_id
+        )
+
+    def change_password(
+        self,
+        *,
+        user_id: str,
+        current_password: str,
+        new_password: str,
+    ) -> dict[str, Any]:
+        try:
+            return self._store.change_password(
+                user_id=user_id,
+                current_password=current_password,
+                new_password=new_password,
+            )
+
+        except PermissionError as exc:
+            raise InvalidCurrentPasswordError(
+                "Current password is invalid."
+            ) from exc
+
     def authenticate_access_token(
         self,
         access_token: str,
@@ -439,5 +511,7 @@ __all__ = [
     "InvalidAccountAccessTokenError",
     "InvalidCredentialsError",
     "InvalidRefreshTokenError",
+    "InvalidCurrentPasswordError",
+    "SessionNotFoundError",
     "authentication_service",
 ]
