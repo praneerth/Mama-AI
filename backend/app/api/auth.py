@@ -38,6 +38,7 @@ from app.core.auth_service import (
     InvalidRefreshTokenError,
     authentication_service,
 )
+from app.core.auth_tokens import TOKEN_PREFIX
 from app.core.principal_context import (
     get_current_principal,
 )
@@ -319,8 +320,13 @@ def authenticate_bearer_token(
             session_id=None,
         )
 
-    if bool(
-        settings.ACCOUNT_AUTH_ENABLED
+    if (
+        bool(
+            settings.ACCOUNT_AUTH_ENABLED
+        )
+        and supplied_token.startswith(
+            TOKEN_PREFIX + "."
+        )
     ):
         try:
             account = (
