@@ -31,6 +31,8 @@ from app.database.database import DATABASE_PATH
 USER_TABLE = "user_accounts"
 SESSION_TABLE = "authentication_sessions"
 ACCOUNT_ACTION_TOKEN_TABLE = "account_action_tokens"
+TWO_FACTOR_CHALLENGE_TABLE = "authentication_two_factor_challenges"
+TWO_FACTOR_RECOVERY_CODE_TABLE = "authentication_two_factor_recovery_codes"
 
 USER_STATUSES = {"active", "disabled", "locked"}
 SESSION_STATUSES = {"active", "revoked", "expired"}
@@ -44,6 +46,17 @@ ACCOUNT_ACTION_TOKEN_STATUSES = {
     "revoked",
     "expired",
 }
+TWO_FACTOR_CHALLENGE_STATUSES = {
+    "active",
+    "consumed",
+    "revoked",
+    "expired",
+}
+TWO_FACTOR_RECOVERY_CODE_STATUSES = {
+    "active",
+    "consumed",
+    "revoked",
+}
 
 PASSWORD_MINIMUM_LENGTH = 12
 PASSWORD_MAXIMUM_LENGTH = 1024
@@ -55,6 +68,8 @@ ACCOUNT_ACTION_TOKEN_MINIMUM_LENGTH = 32
 ACCOUNT_ACTION_TOKEN_MAXIMUM_LENGTH = 2048
 ACCOUNT_ACTION_TOKEN_MINIMUM_SECONDS = 60
 ACCOUNT_ACTION_TOKEN_MAXIMUM_SECONDS = 604800
+TWO_FACTOR_CHALLENGE_MINIMUM_SECONDS = 60
+TWO_FACTOR_CHALLENGE_MAXIMUM_SECONDS = 900
 
 SCRYPT_N = 16384
 SCRYPT_R = 8
@@ -319,7 +334,15 @@ class SQLiteAuthenticationStore:
                         CHECK (failed_login_count >= 0),
                     failed_login_window_started_at TEXT,
                     last_failed_login_at TEXT,
-                    locked_until TEXT
+                    locked_until TEXT,
+                    two_factor_enabled INTEGER NOT NULL DEFAULT 0
+                        CHECK (two_factor_enabled IN (0, 1)),
+                    two_factor_secret_salt TEXT,
+                    two_factor_pending_salt TEXT,
+                    two_factor_confirmed_at TEXT,
+                    two_factor_updated_at TEXT,
+                    two_factor_last_counter INTEGER
+                        CHECK (two_factor_last_counter IS NULL OR two_factor_last_counter >= 0)
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_user_accounts_status
@@ -379,6 +402,58 @@ class SQLiteAuthenticationStore:
 
                 CREATE INDEX IF NOT EXISTS idx_account_action_tokens_expiry
                 ON {ACCOUNT_ACTION_TOKEN_TABLE}(expires_at);
+
+                CREATE TABLE IF NOT EXISTS {TWO_FACTOR_CHALLENGE_TABLE} (
+                    sequence_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    challenge_id TEXT NOT NULL UNIQUE,
+                    user_id TEXT NOT NULL,
+                    token_fingerprint TEXT NOT NULL UNIQUE,
+                    device_name TEXT,
+                    client_ref TEXT,
+                    status TEXT NOT NULL
+                        CHECK (status IN ('active', 'consumed', 'revoked', 'expired')),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    consumed_at TEXT,
+                    revoked_at TEXT,
+                    FOREIGN KEY(user_id)
+                        REFERENCES {USER_TABLE}(user_id)
+                        ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_two_factor_challenges_user
+                ON {TWO_FACTOR_CHALLENGE_TABLE}(
+                    user_id,
+                    status,
+                    updated_at DESC
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_two_factor_challenges_expiry
+                ON {TWO_FACTOR_CHALLENGE_TABLE}(expires_at);
+
+                CREATE TABLE IF NOT EXISTS {TWO_FACTOR_RECOVERY_CODE_TABLE} (
+                    sequence_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code_id TEXT NOT NULL UNIQUE,
+                    user_id TEXT NOT NULL,
+                    code_fingerprint TEXT NOT NULL UNIQUE,
+                    status TEXT NOT NULL
+                        CHECK (status IN ('active', 'consumed', 'revoked')),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    consumed_at TEXT,
+                    revoked_at TEXT,
+                    FOREIGN KEY(user_id)
+                        REFERENCES {USER_TABLE}(user_id)
+                        ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_two_factor_recovery_user
+                ON {TWO_FACTOR_RECOVERY_CODE_TABLE}(
+                    user_id,
+                    status,
+                    updated_at DESC
+                );
                 """
             )
             self._ensure_column_locked(
@@ -414,6 +489,42 @@ class SQLiteAuthenticationStore:
                 table_name=USER_TABLE,
                 column_name="locked_until",
                 column_definition="TEXT",
+            )
+            self._ensure_column_locked(
+                connection,
+                table_name=USER_TABLE,
+                column_name="two_factor_enabled",
+                column_definition="INTEGER NOT NULL DEFAULT 0",
+            )
+            self._ensure_column_locked(
+                connection,
+                table_name=USER_TABLE,
+                column_name="two_factor_secret_salt",
+                column_definition="TEXT",
+            )
+            self._ensure_column_locked(
+                connection,
+                table_name=USER_TABLE,
+                column_name="two_factor_pending_salt",
+                column_definition="TEXT",
+            )
+            self._ensure_column_locked(
+                connection,
+                table_name=USER_TABLE,
+                column_name="two_factor_confirmed_at",
+                column_definition="TEXT",
+            )
+            self._ensure_column_locked(
+                connection,
+                table_name=USER_TABLE,
+                column_name="two_factor_updated_at",
+                column_definition="TEXT",
+            )
+            self._ensure_column_locked(
+                connection,
+                table_name=USER_TABLE,
+                column_name="two_factor_last_counter",
+                column_definition="INTEGER",
             )
             connection.execute(
                 f"""
@@ -828,6 +939,656 @@ class SQLiteAuthenticationStore:
             "lockout_started": lockout_started,
             "already_locked": False,
         }
+
+    def get_two_factor_material(
+        self,
+        user_id: str,
+    ) -> dict[str, Any] | None:
+        """Return internal two-factor derivation material for the service."""
+
+        user_id = self._validate_text(
+            user_id,
+            "User ID",
+            128,
+        )
+
+        with self._connection() as connection:
+            row = connection.execute(
+                f"""
+                SELECT
+                    user_id,
+                    email,
+                    status,
+                    two_factor_enabled,
+                    two_factor_secret_salt,
+                    two_factor_pending_salt,
+                    two_factor_confirmed_at,
+                    two_factor_updated_at,
+                    two_factor_last_counter
+                FROM {USER_TABLE}
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return {
+            "user_id": row["user_id"],
+            "email": row["email"],
+            "status": row["status"],
+            "enabled": bool(row["two_factor_enabled"]),
+            "secret_salt": row["two_factor_secret_salt"],
+            "pending_salt": row["two_factor_pending_salt"],
+            "confirmed_at": row["two_factor_confirmed_at"],
+            "updated_at": row["two_factor_updated_at"],
+            "last_counter": row["two_factor_last_counter"],
+        }
+
+    def start_two_factor_setup(
+        self,
+        *,
+        user_id: str,
+        pending_salt: str,
+    ) -> dict[str, Any]:
+        user_id = self._validate_text(user_id, "User ID", 128)
+        pending_salt = self._validate_text(
+            pending_salt,
+            "Two-factor salt",
+            512,
+        )
+        now_text = self._now().isoformat()
+
+        with self._connection() as connection:
+            cursor = connection.execute(
+                f"""
+                UPDATE {USER_TABLE}
+                SET
+                    two_factor_pending_salt = ?,
+                    two_factor_updated_at = ?,
+                    updated_at = ?
+                WHERE
+                    user_id = ?
+                    AND status = 'active'
+                    AND two_factor_enabled = 0
+                """,
+                (
+                    pending_salt,
+                    now_text,
+                    now_text,
+                    user_id,
+                ),
+            )
+
+            if cursor.rowcount == 0:
+                row = connection.execute(
+                    f"""
+                    SELECT status, two_factor_enabled
+                    FROM {USER_TABLE}
+                    WHERE user_id = ?
+                    """,
+                    (user_id,),
+                ).fetchone()
+
+                if row is None:
+                    raise KeyError(
+                        f"User account was not found: {user_id}"
+                    )
+
+                if bool(row["two_factor_enabled"]):
+                    raise PermissionError(
+                        "Two-factor authentication is already enabled."
+                    )
+
+                raise PermissionError(
+                    "Two-factor setup is unavailable for this account."
+                )
+
+        material = self.get_two_factor_material(user_id)
+        if material is None:
+            raise RuntimeError("Two-factor setup could not be loaded.")
+        return material
+
+    def enable_two_factor(
+        self,
+        *,
+        user_id: str,
+        pending_salt: str,
+        last_counter: int,
+        recovery_code_fingerprints: list[str],
+    ) -> dict[str, Any]:
+        user_id = self._validate_text(user_id, "User ID", 128)
+        pending_salt = self._validate_text(
+            pending_salt,
+            "Two-factor salt",
+            512,
+        )
+        last_counter = self._validate_counter(last_counter)
+        fingerprints = self._validate_fingerprints(
+            recovery_code_fingerprints
+        )
+        now_text = self._now().isoformat()
+
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                f"""
+                SELECT
+                    status,
+                    two_factor_enabled,
+                    two_factor_pending_salt
+                FROM {USER_TABLE}
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+
+            if row is None:
+                raise KeyError(
+                    f"User account was not found: {user_id}"
+                )
+
+            if row["status"] != "active":
+                raise PermissionError(
+                    "Two-factor setup is unavailable for this account."
+                )
+
+            if bool(row["two_factor_enabled"]):
+                raise PermissionError(
+                    "Two-factor authentication is already enabled."
+                )
+
+            stored_pending = row["two_factor_pending_salt"]
+            if (
+                not stored_pending
+                or not secrets.compare_digest(
+                    stored_pending,
+                    pending_salt,
+                )
+            ):
+                raise PermissionError(
+                    "Two-factor setup must be started again."
+                )
+
+            connection.execute(
+                f"""
+                UPDATE {USER_TABLE}
+                SET
+                    two_factor_enabled = 1,
+                    two_factor_secret_salt = ?,
+                    two_factor_pending_salt = NULL,
+                    two_factor_confirmed_at = ?,
+                    two_factor_updated_at = ?,
+                    two_factor_last_counter = ?,
+                    updated_at = ?
+                WHERE user_id = ?
+                """,
+                (
+                    pending_salt,
+                    now_text,
+                    now_text,
+                    last_counter,
+                    now_text,
+                    user_id,
+                ),
+            )
+            self._replace_recovery_codes_locked(
+                connection,
+                user_id=user_id,
+                fingerprints=fingerprints,
+                now_text=now_text,
+            )
+            self._revoke_two_factor_challenges_locked(
+                connection,
+                user_id=user_id,
+                now_text=now_text,
+            )
+            revoked_sessions = self._revoke_user_sessions_locked(
+                connection,
+                user_id=user_id,
+                now_text=now_text,
+            )
+
+        user = self.get_user(user_id)
+        if user is None:
+            raise RuntimeError("Enabled account could not be loaded.")
+        return {
+            "user": user,
+            "revoked_sessions": revoked_sessions,
+            "recovery_code_count": len(fingerprints),
+        }
+
+    def disable_two_factor(
+        self,
+        *,
+        user_id: str,
+    ) -> dict[str, Any]:
+        user_id = self._validate_text(user_id, "User ID", 128)
+        now_text = self._now().isoformat()
+
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            cursor = connection.execute(
+                f"""
+                UPDATE {USER_TABLE}
+                SET
+                    two_factor_enabled = 0,
+                    two_factor_secret_salt = NULL,
+                    two_factor_pending_salt = NULL,
+                    two_factor_confirmed_at = NULL,
+                    two_factor_updated_at = ?,
+                    two_factor_last_counter = NULL,
+                    updated_at = ?
+                WHERE
+                    user_id = ?
+                    AND status = 'active'
+                    AND two_factor_enabled = 1
+                """,
+                (now_text, now_text, user_id),
+            )
+
+            if cursor.rowcount == 0:
+                row = connection.execute(
+                    f"SELECT status FROM {USER_TABLE} WHERE user_id = ?",
+                    (user_id,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(
+                        f"User account was not found: {user_id}"
+                    )
+                raise PermissionError(
+                    "Two-factor authentication is not enabled."
+                )
+
+            connection.execute(
+                f"""
+                UPDATE {TWO_FACTOR_RECOVERY_CODE_TABLE}
+                SET
+                    status = 'revoked',
+                    updated_at = ?,
+                    revoked_at = COALESCE(revoked_at, ?)
+                WHERE user_id = ? AND status = 'active'
+                """,
+                (now_text, now_text, user_id),
+            )
+            self._revoke_two_factor_challenges_locked(
+                connection,
+                user_id=user_id,
+                now_text=now_text,
+            )
+            revoked_sessions = self._revoke_user_sessions_locked(
+                connection,
+                user_id=user_id,
+                now_text=now_text,
+            )
+
+        user = self.get_user(user_id)
+        if user is None:
+            raise RuntimeError("Disabled account could not be loaded.")
+        return {
+            "user": user,
+            "revoked_sessions": revoked_sessions,
+        }
+
+    def replace_two_factor_recovery_codes(
+        self,
+        *,
+        user_id: str,
+        recovery_code_fingerprints: list[str],
+    ) -> dict[str, Any]:
+        user_id = self._validate_text(user_id, "User ID", 128)
+        fingerprints = self._validate_fingerprints(
+            recovery_code_fingerprints
+        )
+        now_text = self._now().isoformat()
+
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                f"""
+                SELECT status, two_factor_enabled
+                FROM {USER_TABLE}
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+
+            if (
+                row is None
+                or row["status"] != "active"
+                or not bool(row["two_factor_enabled"])
+            ):
+                raise PermissionError(
+                    "Two-factor authentication is not enabled."
+                )
+
+            self._replace_recovery_codes_locked(
+                connection,
+                user_id=user_id,
+                fingerprints=fingerprints,
+                now_text=now_text,
+            )
+            revoked_sessions = self._revoke_user_sessions_locked(
+                connection,
+                user_id=user_id,
+                now_text=now_text,
+            )
+
+        return {
+            "recovery_code_count": len(fingerprints),
+            "revoked_sessions": revoked_sessions,
+        }
+
+    def count_active_two_factor_recovery_codes(
+        self,
+        user_id: str,
+    ) -> int:
+        user_id = self._validate_text(user_id, "User ID", 128)
+        with self._connection() as connection:
+            row = connection.execute(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM {TWO_FACTOR_RECOVERY_CODE_TABLE}
+                WHERE user_id = ? AND status = 'active'
+                """,
+                (user_id,),
+            ).fetchone()
+        return int(row["total"] if row is not None else 0)
+
+    def create_two_factor_challenge(
+        self,
+        *,
+        user_id: str,
+        token_fingerprint: str,
+        expires_in_seconds: int,
+        device_name: str | None = None,
+        client_ref: str | None = None,
+    ) -> dict[str, Any]:
+        user_id = self._validate_text(user_id, "User ID", 128)
+        token_fingerprint = self._validate_fingerprint(token_fingerprint)
+        expires_in_seconds = self._validate_two_factor_challenge_expiry(
+            expires_in_seconds
+        )
+        device_name = self._validate_optional_text(
+            device_name,
+            "Device name",
+            200,
+        )
+        client_ref = self._validate_optional_text(
+            client_ref,
+            "Client reference",
+            200,
+        )
+        challenge_id = uuid4().hex
+        now = self._now()
+        now_text = now.isoformat()
+        expires_at = (
+            now + timedelta(seconds=expires_in_seconds)
+        ).isoformat()
+
+        with self._connection() as connection:
+            row = connection.execute(
+                f"""
+                SELECT status, two_factor_enabled
+                FROM {USER_TABLE}
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+            if (
+                row is None
+                or row["status"] != "active"
+                or not bool(row["two_factor_enabled"])
+            ):
+                raise PermissionError(
+                    "Two-factor challenge cannot be created."
+                )
+
+            connection.execute(
+                f"""
+                INSERT INTO {TWO_FACTOR_CHALLENGE_TABLE} (
+                    challenge_id,
+                    user_id,
+                    token_fingerprint,
+                    device_name,
+                    client_ref,
+                    status,
+                    created_at,
+                    updated_at,
+                    expires_at,
+                    consumed_at,
+                    revoked_at
+                ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, NULL, NULL)
+                """,
+                (
+                    challenge_id,
+                    user_id,
+                    token_fingerprint,
+                    device_name,
+                    client_ref,
+                    now_text,
+                    now_text,
+                    expires_at,
+                ),
+            )
+            connection.execute(
+                f"""
+                UPDATE {USER_TABLE}
+                SET
+                    failed_login_count = 0,
+                    failed_login_window_started_at = NULL,
+                    last_failed_login_at = NULL,
+                    locked_until = NULL,
+                    updated_at = ?
+                WHERE user_id = ? AND status = 'active'
+                """,
+                (now_text, user_id),
+            )
+
+        created = self.get_two_factor_challenge(token_fingerprint)
+        if created is None:
+            raise RuntimeError("Two-factor challenge could not be loaded.")
+        return created
+
+    def get_two_factor_challenge(
+        self,
+        token_fingerprint: str,
+    ) -> dict[str, Any] | None:
+        token_fingerprint = self._validate_fingerprint(token_fingerprint)
+        with self._connection() as connection:
+            self._expire_two_factor_challenges_locked(connection)
+            row = connection.execute(
+                f"""
+                SELECT *
+                FROM {TWO_FACTOR_CHALLENGE_TABLE}
+                WHERE token_fingerprint = ?
+                """,
+                (token_fingerprint,),
+            ).fetchone()
+        return self._two_factor_challenge_row_to_dict(row)
+
+    def consume_two_factor_proof(
+        self,
+        *,
+        user_id: str,
+        totp_counter: int | None = None,
+        recovery_code_fingerprint: str | None = None,
+    ) -> bool:
+        user_id = self._validate_text(user_id, "User ID", 128)
+        counter, recovery = self._validate_two_factor_proof(
+            totp_counter=totp_counter,
+            recovery_code_fingerprint=recovery_code_fingerprint,
+        )
+        now_text = self._now().isoformat()
+
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                f"""
+                SELECT status, two_factor_enabled, two_factor_last_counter
+                FROM {USER_TABLE}
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+            if (
+                row is None
+                or row["status"] != "active"
+                or not bool(row["two_factor_enabled"])
+            ):
+                return False
+
+            if counter is not None:
+                previous = row["two_factor_last_counter"]
+                if previous is not None and counter <= int(previous):
+                    return False
+                connection.execute(
+                    f"""
+                    UPDATE {USER_TABLE}
+                    SET
+                        two_factor_last_counter = ?,
+                        two_factor_updated_at = ?,
+                        updated_at = ?
+                    WHERE user_id = ?
+                    """,
+                    (counter, now_text, now_text, user_id),
+                )
+            else:
+                cursor = connection.execute(
+                    f"""
+                    UPDATE {TWO_FACTOR_RECOVERY_CODE_TABLE}
+                    SET
+                        status = 'consumed',
+                        updated_at = ?,
+                        consumed_at = ?
+                    WHERE
+                        user_id = ?
+                        AND code_fingerprint = ?
+                        AND status = 'active'
+                    """,
+                    (now_text, now_text, user_id, recovery),
+                )
+                if cursor.rowcount == 0:
+                    return False
+
+        return True
+
+    def complete_two_factor_challenge(
+        self,
+        *,
+        token_fingerprint: str,
+        user_id: str,
+        totp_counter: int | None = None,
+        recovery_code_fingerprint: str | None = None,
+    ) -> dict[str, Any] | None:
+        token_fingerprint = self._validate_fingerprint(token_fingerprint)
+        user_id = self._validate_text(user_id, "User ID", 128)
+        counter, recovery = self._validate_two_factor_proof(
+            totp_counter=totp_counter,
+            recovery_code_fingerprint=recovery_code_fingerprint,
+        )
+        now_text = self._now().isoformat()
+
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._expire_two_factor_challenges_locked(connection)
+            challenge = connection.execute(
+                f"""
+                SELECT *
+                FROM {TWO_FACTOR_CHALLENGE_TABLE}
+                WHERE
+                    token_fingerprint = ?
+                    AND user_id = ?
+                    AND status = 'active'
+                """,
+                (token_fingerprint, user_id),
+            ).fetchone()
+            user = connection.execute(
+                f"""
+                SELECT status, two_factor_enabled, two_factor_last_counter
+                FROM {USER_TABLE}
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+
+            if (
+                challenge is None
+                or user is None
+                or user["status"] != "active"
+                or not bool(user["two_factor_enabled"])
+            ):
+                return None
+
+            if counter is not None:
+                previous = user["two_factor_last_counter"]
+                if previous is not None and counter <= int(previous):
+                    return None
+            else:
+                recovery_row = connection.execute(
+                    f"""
+                    SELECT code_id
+                    FROM {TWO_FACTOR_RECOVERY_CODE_TABLE}
+                    WHERE
+                        user_id = ?
+                        AND code_fingerprint = ?
+                        AND status = 'active'
+                    """,
+                    (user_id, recovery),
+                ).fetchone()
+                if recovery_row is None:
+                    return None
+
+            if counter is not None:
+                connection.execute(
+                    f"""
+                    UPDATE {USER_TABLE}
+                    SET
+                        two_factor_last_counter = ?,
+                        two_factor_updated_at = ?,
+                        updated_at = ?
+                    WHERE user_id = ?
+                    """,
+                    (counter, now_text, now_text, user_id),
+                )
+            else:
+                connection.execute(
+                    f"""
+                    UPDATE {TWO_FACTOR_RECOVERY_CODE_TABLE}
+                    SET
+                        status = 'consumed',
+                        updated_at = ?,
+                        consumed_at = ?
+                    WHERE
+                        user_id = ?
+                        AND code_fingerprint = ?
+                        AND status = 'active'
+                    """,
+                    (now_text, now_text, user_id, recovery),
+                )
+
+            cursor = connection.execute(
+                f"""
+                UPDATE {TWO_FACTOR_CHALLENGE_TABLE}
+                SET
+                    status = 'consumed',
+                    updated_at = ?,
+                    consumed_at = ?
+                WHERE
+                    challenge_id = ?
+                    AND status = 'active'
+                """,
+                (now_text, now_text, challenge["challenge_id"]),
+            )
+            if cursor.rowcount == 0:
+                return None
+
+        result = dict(challenge)
+        result["status"] = "consumed"
+        result["updated_at"] = now_text
+        result["consumed_at"] = now_text
+        return self._two_factor_challenge_mapping_to_dict(result)
 
     def change_password(
         self,
@@ -2077,11 +2838,110 @@ class SQLiteAuthenticationStore:
     def clear(self) -> None:
         with self._connection() as connection:
             connection.execute(
+                f"DELETE FROM {TWO_FACTOR_RECOVERY_CODE_TABLE}"
+            )
+            connection.execute(
+                f"DELETE FROM {TWO_FACTOR_CHALLENGE_TABLE}"
+            )
+            connection.execute(
                 f"DELETE FROM {ACCOUNT_ACTION_TOKEN_TABLE}"
             )
             connection.execute(f"DELETE FROM {SESSION_TABLE}")
             connection.execute(f"DELETE FROM {USER_TABLE}")
 
+
+    def _expire_two_factor_challenges_locked(
+        self,
+        connection: sqlite3.Connection,
+    ) -> int:
+        now_text = self._now().isoformat()
+        cursor = connection.execute(
+            f"""
+            UPDATE {TWO_FACTOR_CHALLENGE_TABLE}
+            SET status = 'expired', updated_at = ?
+            WHERE status = 'active' AND expires_at <= ?
+            """,
+            (now_text, now_text),
+        )
+        return int(cursor.rowcount)
+
+    def _revoke_two_factor_challenges_locked(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        user_id: str,
+        now_text: str,
+    ) -> int:
+        cursor = connection.execute(
+            f"""
+            UPDATE {TWO_FACTOR_CHALLENGE_TABLE}
+            SET
+                status = 'revoked',
+                updated_at = ?,
+                revoked_at = COALESCE(revoked_at, ?)
+            WHERE user_id = ? AND status = 'active'
+            """,
+            (now_text, now_text, user_id),
+        )
+        return int(cursor.rowcount)
+
+    def _revoke_user_sessions_locked(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        user_id: str,
+        now_text: str,
+    ) -> int:
+        cursor = connection.execute(
+            f"""
+            UPDATE {SESSION_TABLE}
+            SET
+                status = 'revoked',
+                updated_at = ?,
+                revoked_at = COALESCE(revoked_at, ?)
+            WHERE user_id = ? AND status = 'active'
+            """,
+            (now_text, now_text, user_id),
+        )
+        return int(cursor.rowcount)
+
+    def _replace_recovery_codes_locked(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        user_id: str,
+        fingerprints: list[str],
+        now_text: str,
+    ) -> None:
+        connection.execute(
+            f"""
+            UPDATE {TWO_FACTOR_RECOVERY_CODE_TABLE}
+            SET
+                status = 'revoked',
+                updated_at = ?,
+                revoked_at = COALESCE(revoked_at, ?)
+            WHERE user_id = ? AND status = 'active'
+            """,
+            (now_text, now_text, user_id),
+        )
+        connection.executemany(
+            f"""
+            INSERT INTO {TWO_FACTOR_RECOVERY_CODE_TABLE} (
+                code_id,
+                user_id,
+                code_fingerprint,
+                status,
+                created_at,
+                updated_at,
+                consumed_at,
+                revoked_at
+            ) VALUES (?, ?, ?, 'active', ?, ?, NULL, NULL)
+            """,
+            [
+                (uuid4().hex, user_id, value, now_text, now_text)
+                for value in fingerprints
+            ],
+        )
 
     def _unlock_expired_user_locks_locked(
         self,
@@ -2223,6 +3083,15 @@ class SQLiteAuthenticationStore:
             "email_verified": (
                 row["email_verified_at"] is not None
             ),
+            "two_factor_enabled": bool(
+                row["two_factor_enabled"]
+            ),
+            "two_factor_confirmed_at": (
+                row["two_factor_confirmed_at"]
+            ),
+            "two_factor_updated_at": (
+                row["two_factor_updated_at"]
+            ),
         }
 
     @staticmethod
@@ -2246,6 +3115,34 @@ class SQLiteAuthenticationStore:
             "consumed_at": row["consumed_at"],
             "revoked_at": row["revoked_at"],
         }
+
+    @staticmethod
+    def _two_factor_challenge_mapping_to_dict(
+        row: Any,
+    ) -> dict[str, Any]:
+        fingerprint = row["token_fingerprint"]
+        return {
+            "challenge_id": row["challenge_id"],
+            "user_id": row["user_id"],
+            "token_ref": fingerprint[:12],
+            "device_name": row["device_name"],
+            "client_ref": row["client_ref"],
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "expires_at": row["expires_at"],
+            "consumed_at": row["consumed_at"],
+            "revoked_at": row["revoked_at"],
+        }
+
+    @classmethod
+    def _two_factor_challenge_row_to_dict(
+        cls,
+        row: sqlite3.Row | None,
+    ) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        return cls._two_factor_challenge_mapping_to_dict(row)
 
     @staticmethod
     def _session_row_to_dict(
@@ -2432,6 +3329,80 @@ class SQLiteAuthenticationStore:
                 )
 
     @staticmethod
+    def _validate_counter(value: int) -> int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError("TOTP counter must be an integer.")
+        if value < 0:
+            raise ValueError("TOTP counter cannot be negative.")
+        return value
+
+    @classmethod
+    def _validate_fingerprints(cls, values: list[str]) -> list[str]:
+        if not isinstance(values, list):
+            raise TypeError("Recovery-code fingerprints must be a list.")
+        normalized = [cls._validate_fingerprint(value) for value in values]
+        if not 5 <= len(normalized) <= 20:
+            raise ValueError(
+                "Recovery-code fingerprints must contain 5 to 20 values."
+            )
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("Recovery-code fingerprints must be unique.")
+        return normalized
+
+    @staticmethod
+    def _validate_fingerprint(value: str) -> str:
+        if not isinstance(value, str):
+            raise TypeError("Fingerprint must be text.")
+        normalized = value.strip().lower()
+        if (
+            len(normalized) != 64
+            or any(character not in "0123456789abcdef" for character in normalized)
+        ):
+            raise ValueError("Fingerprint is invalid.")
+        return normalized
+
+    @classmethod
+    def _validate_two_factor_proof(
+        cls,
+        *,
+        totp_counter: int | None,
+        recovery_code_fingerprint: str | None,
+    ) -> tuple[int | None, str | None]:
+        supplied = int(totp_counter is not None) + int(
+            recovery_code_fingerprint is not None
+        )
+        if supplied != 1:
+            raise ValueError(
+                "Exactly one two-factor proof must be supplied."
+            )
+        if totp_counter is not None:
+            return cls._validate_counter(totp_counter), None
+        return None, cls._validate_fingerprint(
+            str(recovery_code_fingerprint)
+        )
+
+    @staticmethod
+    def _validate_two_factor_challenge_expiry(
+        expires_in_seconds: int,
+    ) -> int:
+        if (
+            isinstance(expires_in_seconds, bool)
+            or not isinstance(expires_in_seconds, int)
+        ):
+            raise TypeError("Two-factor challenge expiry must be an integer.")
+        if not (
+            TWO_FACTOR_CHALLENGE_MINIMUM_SECONDS
+            <= expires_in_seconds
+            <= TWO_FACTOR_CHALLENGE_MAXIMUM_SECONDS
+        ):
+            raise ValueError(
+                "Two-factor challenge expiry must be between "
+                f"{TWO_FACTOR_CHALLENGE_MINIMUM_SECONDS} and "
+                f"{TWO_FACTOR_CHALLENGE_MAXIMUM_SECONDS} seconds."
+            )
+        return expires_in_seconds
+
+    @staticmethod
     def _validate_session_expiry(expires_in_seconds: int) -> int:
         if isinstance(expires_in_seconds, bool) or not isinstance(
             expires_in_seconds,
@@ -2472,6 +3443,8 @@ __all__ = [
     "REFRESH_TOKEN_MINIMUM_LENGTH",
     "SESSION_STATUSES",
     "SESSION_TABLE",
+    "TWO_FACTOR_CHALLENGE_TABLE",
+    "TWO_FACTOR_RECOVERY_CODE_TABLE",
     "SQLiteAuthenticationStore",
     "USER_STATUSES",
     "USER_TABLE",

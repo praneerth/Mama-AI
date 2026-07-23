@@ -39,7 +39,11 @@ from app.core.auth_service import (
     InvalidCurrentPasswordError,
     InvalidRefreshTokenError,
     InvalidPasswordResetTokenError,
+    InvalidTwoFactorAuthenticationError,
     SessionNotFoundError,
+    TwoFactorAlreadyEnabledError,
+    TwoFactorNotEnabledError,
+    TwoFactorSetupRequiredError,
     authentication_service,
 )
 from app.core.auth_email import (
@@ -122,6 +126,26 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str
+
+
+class TwoFactorSetupRequest(BaseModel):
+    current_password: str
+
+
+class TwoFactorEnableRequest(BaseModel):
+    code: str
+
+
+class TwoFactorLoginVerifyRequest(BaseModel):
+    challenge_token: str
+    code: str | None = None
+    recovery_code: str | None = None
+
+
+class TwoFactorProtectedChangeRequest(BaseModel):
+    current_password: str
+    code: str | None = None
+    recovery_code: str | None = None
 
 
 def _authentication_error(
@@ -400,6 +424,39 @@ def _record_account_login_failure(
             ),
             metadata=metadata,
         )
+
+
+def _record_two_factor_event(
+    *,
+    event_type: str,
+    severity: str,
+    message: str,
+    owner_id: str | None = None,
+    challenge_token: str | None = None,
+    request_path: str,
+    status_code: int = 200,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    client_ref = None
+    if challenge_token:
+        client_ref = (
+            "two-factor:"
+            + _token_fingerprint(challenge_token)
+        )
+    record_security_event_safely(
+        event_type=event_type,
+        severity=severity,
+        client_ref=client_ref,
+        owner_id=owner_id,
+        request_method="POST",
+        request_path=request_path,
+        status_code=status_code,
+        message=message,
+        metadata={
+            "scope": "account_two_factor",
+            **(metadata or {}),
+        },
+    )
 
 
 def authenticate_bearer_token(
@@ -789,6 +846,68 @@ def login_account(
             detail=str(exc),
         ) from exc
 
+    if token_bundle.get("requires_two_factor"):
+        _record_two_factor_event(
+            event_type="two_factor_challenge_issued",
+            severity="info",
+            message="Two-factor login challenge issued.",
+            challenge_token=token_bundle["challenge_token"],
+            request_path="/auth/login",
+            metadata={
+                "challenge_expires_in": token_bundle[
+                    "challenge_expires_in"
+                ],
+            },
+        )
+
+    return {
+        "success": True,
+        **token_bundle,
+    }
+
+
+@router.post("/two-factor/login/verify")
+def verify_two_factor_login(
+    payload: TwoFactorLoginVerifyRequest,
+) -> dict[str, Any]:
+    if not bool(settings.ACCOUNT_AUTH_ENABLED):
+        raise HTTPException(
+            status_code=404,
+            detail="Account authentication is disabled.",
+        )
+
+    try:
+        token_bundle = authentication_service.complete_two_factor_login(
+            challenge_token=payload.challenge_token,
+            code=payload.code,
+            recovery_code=payload.recovery_code,
+        )
+    except InvalidTwoFactorAuthenticationError as exc:
+        _record_two_factor_event(
+            event_type="two_factor_authentication_failed",
+            severity="warning",
+            message="Two-factor login verification failed.",
+            challenge_token=payload.challenge_token,
+            request_path="/auth/two-factor/login/verify",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+        raise _authentication_error(
+            "Two-factor authentication code or challenge is invalid."
+        ) from exc
+    except AuthenticationConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    _record_two_factor_event(
+        event_type="two_factor_authentication_succeeded",
+        severity="info",
+        message="Two-factor login verification succeeded.",
+        owner_id=token_bundle["user"]["user_id"],
+        challenge_token=payload.challenge_token,
+        request_path="/auth/two-factor/login/verify",
+    )
     return {
         "success": True,
         **token_bundle,
@@ -1013,6 +1132,205 @@ def change_account_password(
 
 
 
+@router.get("/two-factor/status")
+def two_factor_status(
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_principal),
+    ],
+) -> dict[str, Any]:
+    principal = _require_account_principal(principal)
+    try:
+        result = authentication_service.two_factor_status(
+            user_id=principal.owner_id
+        )
+    except InvalidAccountAccessTokenError as exc:
+        raise _authentication_error("Bearer token is invalid.") from exc
+    return {
+        "success": True,
+        **result,
+    }
+
+
+@router.post("/two-factor/setup")
+def start_two_factor_setup(
+    payload: TwoFactorSetupRequest,
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_principal),
+    ],
+) -> dict[str, Any]:
+    principal = _require_account_principal(principal)
+    try:
+        result = authentication_service.start_two_factor_setup(
+            user_id=principal.owner_id,
+            current_password=payload.current_password,
+        )
+    except InvalidCurrentPasswordError as exc:
+        raise _authentication_error(str(exc)) from exc
+    except TwoFactorAlreadyEnabledError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except AuthenticationConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except (KeyError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    _record_two_factor_event(
+        event_type="two_factor_setup_started",
+        severity="info",
+        message="Two-factor setup started.",
+        owner_id=principal.owner_id,
+        request_path="/auth/two-factor/setup",
+    )
+    return {
+        "success": True,
+        **result,
+    }
+
+
+@router.post("/two-factor/enable")
+def enable_two_factor(
+    payload: TwoFactorEnableRequest,
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_principal),
+    ],
+) -> dict[str, Any]:
+    principal = _require_account_principal(principal)
+    try:
+        result = authentication_service.enable_two_factor(
+            user_id=principal.owner_id,
+            code=payload.code,
+        )
+    except InvalidTwoFactorAuthenticationError as exc:
+        _record_two_factor_event(
+            event_type="two_factor_enable_failed",
+            severity="warning",
+            message="Two-factor enable confirmation failed.",
+            owner_id=principal.owner_id,
+            request_path="/auth/two-factor/enable",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except TwoFactorSetupRequiredError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except TwoFactorAlreadyEnabledError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except AuthenticationConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    _record_two_factor_event(
+        event_type="two_factor_enabled",
+        severity="info",
+        message="Two-factor authentication enabled.",
+        owner_id=principal.owner_id,
+        request_path="/auth/two-factor/enable",
+        metadata={
+            "revoked_sessions": result["revoked_sessions"],
+            "recovery_code_count": result["recovery_code_count"],
+        },
+    )
+    return {
+        "success": True,
+        **result,
+    }
+
+
+@router.post("/two-factor/disable")
+def disable_two_factor(
+    payload: TwoFactorProtectedChangeRequest,
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_principal),
+    ],
+) -> dict[str, Any]:
+    principal = _require_account_principal(principal)
+    try:
+        result = authentication_service.disable_two_factor(
+            user_id=principal.owner_id,
+            current_password=payload.current_password,
+            code=payload.code,
+            recovery_code=payload.recovery_code,
+        )
+    except InvalidCurrentPasswordError as exc:
+        raise _authentication_error(str(exc)) from exc
+    except InvalidTwoFactorAuthenticationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except TwoFactorNotEnabledError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except AuthenticationConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    _record_two_factor_event(
+        event_type="two_factor_disabled",
+        severity="warning",
+        message="Two-factor authentication disabled.",
+        owner_id=principal.owner_id,
+        request_path="/auth/two-factor/disable",
+        metadata={
+            "revoked_sessions": result["revoked_sessions"],
+        },
+    )
+    return {
+        "success": True,
+        **result,
+    }
+
+
+@router.post("/two-factor/recovery-codes/regenerate")
+def regenerate_two_factor_recovery_codes(
+    payload: TwoFactorProtectedChangeRequest,
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_principal),
+    ],
+) -> dict[str, Any]:
+    principal = _require_account_principal(principal)
+    try:
+        result = authentication_service.regenerate_two_factor_recovery_codes(
+            user_id=principal.owner_id,
+            current_password=payload.current_password,
+            code=payload.code,
+            recovery_code=payload.recovery_code,
+        )
+    except InvalidCurrentPasswordError as exc:
+        raise _authentication_error(str(exc)) from exc
+    except InvalidTwoFactorAuthenticationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except TwoFactorNotEnabledError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except AuthenticationConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    _record_two_factor_event(
+        event_type="two_factor_recovery_codes_regenerated",
+        severity="warning",
+        message="Two-factor recovery codes regenerated.",
+        owner_id=principal.owner_id,
+        request_path="/auth/two-factor/recovery-codes/regenerate",
+        metadata={
+            "revoked_sessions": result["revoked_sessions"],
+            "recovery_code_count": result["recovery_code_count"],
+        },
+    )
+    return {
+        "success": True,
+        **result,
+    }
+
+
 @router.post("/email-verification/request")
 def request_email_verification(
     principal: Annotated[
@@ -1207,6 +1525,10 @@ __all__ = [
     "ForgotPasswordRequest",
     "LoginRequest",
     "RefreshRequest",
+    "TwoFactorEnableRequest",
+    "TwoFactorLoginVerifyRequest",
+    "TwoFactorProtectedChangeRequest",
+    "TwoFactorSetupRequest",
     "ResetPasswordRequest",
     "RegisterRequest",
     "authenticate_bearer_token",
@@ -1223,7 +1545,13 @@ __all__ = [
     "refresh_account_session",
     "request_email_verification",
     "reset_account_password",
+    "regenerate_two_factor_recovery_codes",
     "revoke_account_session",
+    "start_two_factor_setup",
+    "two_factor_status",
+    "enable_two_factor",
+    "disable_two_factor",
+    "verify_two_factor_login",
     "register_account",
     "require_principal",
     "require_resource_owner",

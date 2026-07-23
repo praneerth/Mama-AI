@@ -245,6 +245,46 @@ AUTH_ACCOUNT_LOCKOUT_SECONDS = _environment_int(
     minimum=60,
 )
 
+
+# =====================================================
+# Two-Factor Authentication
+# =====================================================
+
+AUTH_TWO_FACTOR_ENABLED = _environment_bool(
+    "MAMA_AUTH_TWO_FACTOR_ENABLED",
+    True,
+)
+
+# Independent server key used to derive per-user TOTP secrets.
+# It must never be logged, returned by an endpoint, or committed.
+AUTH_TWO_FACTOR_SECRET_KEY = os.getenv(
+    "MAMA_AUTH_TWO_FACTOR_SECRET_KEY",
+    "",
+).strip()
+
+AUTH_TWO_FACTOR_ISSUER = os.getenv(
+    "MAMA_AUTH_TWO_FACTOR_ISSUER",
+    "Mama AI",
+).strip() or "Mama AI"
+
+AUTH_TWO_FACTOR_CHALLENGE_SECONDS = _environment_int(
+    "MAMA_AUTH_TWO_FACTOR_CHALLENGE_SECONDS",
+    300,
+    minimum=60,
+)
+
+AUTH_TWO_FACTOR_TOTP_WINDOW = _environment_int(
+    "MAMA_AUTH_TWO_FACTOR_TOTP_WINDOW",
+    1,
+    minimum=0,
+)
+
+AUTH_TWO_FACTOR_RECOVERY_CODE_COUNT = _environment_int(
+    "MAMA_AUTH_TWO_FACTOR_RECOVERY_CODE_COUNT",
+    10,
+    minimum=5,
+)
+
 # =====================================================
 # Rate Limiting and Authentication-Abuse Protection
 # =====================================================
