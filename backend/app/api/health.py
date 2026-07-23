@@ -14,10 +14,17 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.core.approval_registry import approval_registry
+from app.core.idempotency_maintenance import (
+    idempotency_maintenance,
+)
 from app.core.runtime_state import runtime_state
 from app.core.task_registry import task_registry
 from app.core.task_worker import task_worker
 from app.database.database import DATABASE_PATH
+from app.database.idempotency_db import (
+    IDEMPOTENCY_STATUSES,
+    idempotency_store,
+)
 from app.database.queue_db import (
     QUEUE_STATUSES,
     task_queue_store,
@@ -180,15 +187,83 @@ def _queue_status() -> dict[str, Any]:
     }
 
 
+def _idempotency_status() -> dict[str, Any]:
+    """Collect idempotency storage and cleanup-worker health."""
+
+    maintenance = (
+        idempotency_maintenance.snapshot()
+    )
+
+    try:
+        summary = (
+            idempotency_store.health_summary(
+                stuck_after_seconds=(
+                    settings.IDEMPOTENCY_STUCK_SECONDS
+                )
+            )
+        )
+
+    except Exception as exc:
+        return {
+            "status": "unavailable",
+            "available": False,
+            "total": None,
+            "counts": {
+                status: None
+                for status in sorted(
+                    IDEMPOTENCY_STATUSES
+                )
+            },
+            "expired": None,
+            "stuck_processing": None,
+            "stuck_after_seconds": (
+                settings.IDEMPOTENCY_STUCK_SECONDS
+            ),
+            "oldest_processing_at": None,
+            "checked_at": None,
+            "maintenance": maintenance,
+            "error": str(exc),
+        }
+
+    if summary["stuck_processing"]:
+        status = "degraded"
+
+    elif (
+        maintenance["enabled"]
+        and (
+            not maintenance["running"]
+            or maintenance["last_error"]
+            is not None
+        )
+    ):
+        status = "degraded"
+
+    elif not maintenance["enabled"]:
+        status = "disabled"
+
+    else:
+        status = "healthy"
+
+    return {
+        "status": status,
+        "available": True,
+        **summary,
+        "maintenance": maintenance,
+        "error": None,
+    }
+
+
 def _readiness_payload() -> dict[str, Any]:
     """Build the complete backend-readiness report."""
 
     database = _database_status()
     queue = _queue_status()
+    idempotency = _idempotency_status()
 
     checks = {
         "database": database["available"],
         "queue": queue["available"],
+        "idempotency": idempotency["available"],
         "runtime_started": runtime_state.started,
         "task_persistence": (
             task_registry.persistence_enabled
@@ -224,6 +299,7 @@ def _readiness_payload() -> dict[str, Any]:
                 queue["stale_claimed"]
             ),
         },
+        "idempotency": idempotency,
     }
 
 
@@ -294,6 +370,9 @@ def runtime_health() -> dict[str, Any]:
         "last_reconciliation": (
             runtime_state.last_reconciliation
         ),
+        "idempotency_maintenance": (
+            idempotency_maintenance.snapshot()
+        ),
     }
 
 
@@ -318,9 +397,17 @@ def queue_health() -> dict[str, Any]:
     }
 
 
+@router.get("/health/idempotency")
+def idempotency_health() -> dict[str, Any]:
+    """Return persistent idempotency and cleanup-worker health."""
+
+    return _idempotency_status()
+
+
 __all__ = [
     "QUEUE_SCAN_LIMIT",
     "health",
+    "idempotency_health",
     "queue_health",
     "readiness",
     "router",

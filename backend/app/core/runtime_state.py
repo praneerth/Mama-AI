@@ -12,6 +12,9 @@ from app.core.approval_registry import (
     ApprovalRegistry,
     approval_registry,
 )
+from app.core.idempotency_maintenance import (
+    idempotency_maintenance,
+)
 from app.core.queue_reconciler import (
     QueueReconciler,
     queue_reconciler,
@@ -65,6 +68,7 @@ class RuntimeStateManager:
     2. Restore persistent approvals
     3. Reconcile task and queue state
     4. Start the durable worker
+    5. Start idempotency maintenance
 
     Startup and shutdown operations are idempotent.
     """
@@ -76,12 +80,14 @@ class RuntimeStateManager:
         store: SQLiteStateStore,
         worker: RuntimeWorker | None = None,
         reconciler: RuntimeReconciler | None = None,
+        maintenance_worker: RuntimeWorker | None = None,
     ) -> None:
         self._tasks = tasks
         self._approvals = approvals
         self._store = store
         self._worker = worker
         self._reconciler = reconciler
+        self._maintenance_worker = maintenance_worker
 
         self._lock = RLock()
         self._started = False
@@ -134,6 +140,12 @@ class RuntimeStateManager:
                         else None
                     ),
                     "worker_started": False,
+                    "maintenance_started": False,
+                    "maintenance_running": (
+                        self._maintenance_worker.running
+                        if self._maintenance_worker is not None
+                        else False
+                    ),
                     "worker_running": (
                         self._worker.running
                         if self._worker is not None
@@ -145,6 +157,7 @@ class RuntimeStateManager:
                 }
 
             worker_started = False
+            maintenance_started = False
             reconciliation_summary = None
 
             try:
@@ -181,7 +194,20 @@ class RuntimeStateManager:
                         self._worker.start()
                     )
 
+                if self._maintenance_worker is not None:
+                    maintenance_started = (
+                        self._maintenance_worker.start()
+                    )
+
             except Exception:
+                if (
+                    self._maintenance_worker is not None
+                    and self._maintenance_worker.running
+                ):
+                    self._maintenance_worker.stop(
+                        timeout=5
+                    )
+
                 if (
                     self._worker is not None
                     and self._worker.running
@@ -223,6 +249,12 @@ class RuntimeStateManager:
                     if self._worker is not None
                     else False
                 ),
+                "maintenance_started": maintenance_started,
+                "maintenance_running": (
+                    self._maintenance_worker.running
+                    if self._maintenance_worker is not None
+                    else False
+                ),
                 "database_path": (
                     self._store.database_path
                 ),
@@ -247,6 +279,7 @@ class RuntimeStateManager:
                     "stopped": True,
                     "already_stopped": True,
                     "worker_stopped": True,
+                    "maintenance_stopped": True,
                     "tasks_in_memory": task_count,
                     "approvals_in_memory": (
                         approval_count
@@ -254,6 +287,14 @@ class RuntimeStateManager:
                 }
 
             worker_stopped = True
+            maintenance_stopped = True
+
+            if self._maintenance_worker is not None:
+                maintenance_stopped = (
+                    self._maintenance_worker.stop(
+                        timeout=30
+                    )
+                )
 
             if self._worker is not None:
                 worker_stopped = (
@@ -270,6 +311,7 @@ class RuntimeStateManager:
                 "stopped": True,
                 "already_stopped": False,
                 "worker_stopped": worker_stopped,
+                "maintenance_stopped": maintenance_stopped,
                 "tasks_in_memory": task_count,
                 "approvals_in_memory": (
                     approval_count
@@ -319,6 +361,9 @@ runtime_state = RuntimeStateManager(
     store=state_store,
     worker=task_worker,
     reconciler=queue_reconciler,
+    maintenance_worker=(
+        idempotency_maintenance
+    ),
 )
 
 

@@ -184,6 +184,31 @@ AUTH_COOLDOWN_SECONDS = _environment_int(
 
 
 # =====================================================
+# Idempotency Maintenance
+# =====================================================
+
+IDEMPOTENCY_MAINTENANCE_ENABLED = _environment_bool(
+    "MAMA_IDEMPOTENCY_MAINTENANCE_ENABLED",
+    True,
+)
+
+IDEMPOTENCY_CLEANUP_INTERVAL_SECONDS = _environment_int(
+    "MAMA_IDEMPOTENCY_CLEANUP_INTERVAL_SECONDS",
+    300,
+)
+
+IDEMPOTENCY_CLEANUP_BATCH_SIZE = _environment_int(
+    "MAMA_IDEMPOTENCY_CLEANUP_BATCH_SIZE",
+    1000,
+)
+
+IDEMPOTENCY_STUCK_SECONDS = _environment_int(
+    "MAMA_IDEMPOTENCY_STUCK_SECONDS",
+    300,
+)
+
+
+# =====================================================
 # Directories
 # =====================================================
 

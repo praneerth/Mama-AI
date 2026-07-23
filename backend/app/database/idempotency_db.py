@@ -888,6 +888,143 @@ class SQLiteIdempotencyStore:
             row["total"]
         )
 
+
+    def health_summary(
+        self,
+        *,
+        stuck_after_seconds: int = 300,
+    ) -> dict[str, Any]:
+        """
+        Return aggregate idempotency health without exposing keys or bodies.
+
+        Active records are grouped by status. Processing records whose
+        updated timestamp is older than the configured threshold are
+        reported as stuck. Expired records are counted separately.
+        """
+
+        stuck_after_seconds = (
+            self._validate_stuck_after(
+                stuck_after_seconds
+            )
+        )
+
+        now = self._now()
+        now_text = now.isoformat()
+        stuck_before = (
+            now
+            - timedelta(
+                seconds=stuck_after_seconds
+            )
+        ).isoformat()
+
+        with self._connect() as connection:
+            row = connection.execute(
+                f"""
+                SELECT
+                    SUM(
+                        CASE
+                            WHEN expires_at > ?
+                            THEN 1
+                            ELSE 0
+                        END
+                    ) AS active_total,
+                    SUM(
+                        CASE
+                            WHEN
+                                expires_at > ?
+                                AND status = 'processing'
+                            THEN 1
+                            ELSE 0
+                        END
+                    ) AS processing,
+                    SUM(
+                        CASE
+                            WHEN
+                                expires_at > ?
+                                AND status = 'completed'
+                            THEN 1
+                            ELSE 0
+                        END
+                    ) AS completed,
+                    SUM(
+                        CASE
+                            WHEN
+                                expires_at > ?
+                                AND status = 'failed'
+                            THEN 1
+                            ELSE 0
+                        END
+                    ) AS failed,
+                    SUM(
+                        CASE
+                            WHEN expires_at <= ?
+                            THEN 1
+                            ELSE 0
+                        END
+                    ) AS expired,
+                    SUM(
+                        CASE
+                            WHEN
+                                expires_at > ?
+                                AND status = 'processing'
+                                AND updated_at <= ?
+                            THEN 1
+                            ELSE 0
+                        END
+                    ) AS stuck_processing,
+                    MIN(
+                        CASE
+                            WHEN
+                                expires_at > ?
+                                AND status = 'processing'
+                            THEN updated_at
+                            ELSE NULL
+                        END
+                    ) AS oldest_processing_at
+                FROM {IDEMPOTENCY_TABLE}
+                """,
+                (
+                    now_text,
+                    now_text,
+                    now_text,
+                    now_text,
+                    now_text,
+                    now_text,
+                    stuck_before,
+                    now_text,
+                ),
+            ).fetchone()
+
+        return {
+            "total": int(
+                row["active_total"] or 0
+            ),
+            "counts": {
+                "processing": int(
+                    row["processing"] or 0
+                ),
+                "completed": int(
+                    row["completed"] or 0
+                ),
+                "failed": int(
+                    row["failed"] or 0
+                ),
+            },
+            "expired": int(
+                row["expired"] or 0
+            ),
+            "stuck_processing": int(
+                row["stuck_processing"] or 0
+            ),
+            "stuck_after_seconds": (
+                stuck_after_seconds
+            ),
+            "oldest_processing_at": (
+                row["oldest_processing_at"]
+            ),
+            "checked_at": now_text,
+        }
+
     def clear(self) -> None:
         with self._connect() as connection:
             connection.execute(
@@ -1115,6 +1252,33 @@ class SQLiteIdempotencyStore:
             )
 
         return expiry_seconds
+
+
+    @staticmethod
+    def _validate_stuck_after(
+        stuck_after_seconds: int,
+    ) -> int:
+        if (
+            isinstance(
+                stuck_after_seconds,
+                bool,
+            )
+            or not isinstance(
+                stuck_after_seconds,
+                int,
+            )
+        ):
+            raise TypeError(
+                "Stuck-processing threshold must be an integer."
+            )
+
+        if not 1 <= stuck_after_seconds <= 604800:
+            raise ValueError(
+                "Stuck-processing threshold must be "
+                "between 1 and 604800 seconds."
+            )
+
+        return stuck_after_seconds
 
     @staticmethod
     def _validate_limit(
