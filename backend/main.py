@@ -19,6 +19,9 @@ from app.core.runtime_state import (
     initialize_runtime_state,
     shutdown_runtime_state,
 )
+from app.database.auth_db import (
+    authentication_store,
+)
 from app.database.database import initialize_database
 from app.database.idempotency_db import (
     idempotency_store,
@@ -45,6 +48,7 @@ async def lifespan(app: FastAPI):
     )
 
     initialize_database()
+    authentication_store.initialize()
     security_event_store.initialize()
     idempotency_store.initialize()
 
