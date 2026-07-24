@@ -20,6 +20,7 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Request,
     status,
 )
 from fastapi.encoders import jsonable_encoder
@@ -31,9 +32,13 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.core.auth_service import (
+    AccountAdministrationConflictError,
+    AccountAuthorizationError,
     AccountExistsError,
+    AccountNotFoundError,
     AuthenticationConfigurationError,
     InvalidAccountAccessTokenError,
+    InvalidAccountRoleError,
     InvalidCredentialsError,
     InvalidEmailVerificationTokenError,
     InvalidCurrentPasswordError,
@@ -52,6 +57,13 @@ from app.core.auth_email import (
     authentication_email_sender,
 )
 from app.core.auth_tokens import TOKEN_PREFIX
+from app.core.rbac import (
+    PERMISSION_ACCOUNTS_MANAGE,
+    PERMISSION_ACCOUNTS_READ,
+    has_permission,
+    normalize_roles,
+    permissions_for_roles,
+)
 from app.core.principal_context import (
     get_current_principal,
 )
@@ -79,6 +91,21 @@ class AuthenticatedPrincipal:
     authentication_method: str
     token_fingerprint: str | None = None
     session_id: str | None = None
+    roles: tuple[str, ...] = ("user",)
+
+    @property
+    def permissions(self) -> tuple[str, ...]:
+        return permissions_for_roles(
+            self.roles
+        )
+
+    def has_permission(
+        self,
+        permission: str,
+    ) -> bool:
+        return has_permission(
+            self.roles, permission
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -90,6 +117,10 @@ class AuthenticatedPrincipal:
                 self.token_fingerprint
             ),
             "session_id": self.session_id,
+            "roles": list(self.roles),
+            "permissions": list(
+                self.permissions
+            ),
         }
 
 
@@ -217,6 +248,43 @@ def configured_owner_id() -> str:
         )
 
     return owner_id
+
+
+def _configured_static_roles() -> tuple[str, ...]:
+    try:
+        return normalize_roles(
+            str(
+                settings.AUTH_STATIC_COMPATIBILITY_ROLES
+            ),
+            ensure_user=True,
+        )
+    except (TypeError, ValueError) as exc:
+        detail = (
+            "Mama AI static authentication roles "
+            "are configured invalidly."
+        )
+        record_security_event_safely(
+            event_type="security_configuration_error",
+            severity="error",
+            owner_id=str(
+                settings.AUTH_OWNER_ID
+            ).strip() or None,
+            status_code=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+            ),
+            message=detail,
+            metadata={
+                "configuration_field": (
+                    "MAMA_AUTH_STATIC_COMPATIBILITY_ROLES"
+                ),
+            },
+        )
+        raise HTTPException(
+            status_code=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+            ),
+            detail=detail,
+        ) from exc
 
 
 def _configured_token_if_available() -> str | None:
@@ -502,6 +570,7 @@ def authenticate_bearer_token(
                 )
             ),
             session_id=None,
+            roles=_configured_static_roles(),
         )
 
     if (
@@ -555,6 +624,10 @@ def authenticate_bearer_token(
             ),
             session_id=(
                 session["session_id"]
+            ),
+            roles=normalize_roles(
+                user.get("roles", ()),
+                ensure_user=True,
             ),
         )
 
@@ -734,6 +807,7 @@ def require_principal(
             ),
             token_fingerprint=None,
             session_id=None,
+            roles=_configured_static_roles(),
         )
 
     if credentials is None:
@@ -748,6 +822,82 @@ def require_principal(
 
     return authenticate_bearer_token(
         credentials.credentials
+    )
+
+
+def _record_authorization_denied(
+    *,
+    principal: AuthenticatedPrincipal,
+    permission: str,
+    request: Request,
+) -> None:
+    record_security_event_safely(
+        event_type="authorization_denied",
+        severity="warning",
+        owner_id=principal.owner_id,
+        request_method=request.method,
+        request_path=request.url.path,
+        status_code=status.HTTP_403_FORBIDDEN,
+        message="Authenticated principal lacks a required permission.",
+        metadata={
+            "required_permission": permission,
+            "roles": list(principal.roles),
+            "authentication_method": (
+                principal.authentication_method
+            ),
+        },
+    )
+
+
+def _require_permission(
+    *,
+    principal: AuthenticatedPrincipal,
+    permission: str,
+    request: Request,
+) -> AuthenticatedPrincipal:
+    if not principal.has_permission(
+        permission
+    ):
+        _record_authorization_denied(
+            principal=principal,
+            permission=permission,
+            request=request,
+        )
+        raise HTTPException(
+            status_code=(
+                status.HTTP_403_FORBIDDEN
+            ),
+            detail="Permission denied.",
+        )
+
+    return principal
+
+
+def require_account_reader(
+    request: Request,
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_principal),
+    ],
+) -> AuthenticatedPrincipal:
+    return _require_permission(
+        principal=principal,
+        permission=PERMISSION_ACCOUNTS_READ,
+        request=request,
+    )
+
+
+def require_account_administrator(
+    request: Request,
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_principal),
+    ],
+) -> AuthenticatedPrincipal:
+    return _require_permission(
+        principal=principal,
+        permission=PERMISSION_ACCOUNTS_MANAGE,
+        request=request,
     )
 
 
@@ -1553,6 +1703,8 @@ __all__ = [
     "disable_two_factor",
     "verify_two_factor_login",
     "register_account",
+    "require_account_administrator",
+    "require_account_reader",
     "require_principal",
     "require_resource_owner",
     "resolve_requested_owner",

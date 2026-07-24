@@ -25,10 +25,17 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from app.core.rbac import (
+    ACCOUNT_ROLES,
+    ROLE_ADMIN,
+    ROLE_USER,
+    validate_role,
+)
 from app.database.database import DATABASE_PATH
 
 
 USER_TABLE = "user_accounts"
+USER_ROLE_TABLE = "user_account_roles"
 SESSION_TABLE = "authentication_sessions"
 ACCOUNT_ACTION_TOKEN_TABLE = "account_action_tokens"
 TWO_FACTOR_CHALLENGE_TABLE = "authentication_two_factor_challenges"
@@ -348,6 +355,21 @@ class SQLiteAuthenticationStore:
                 CREATE INDEX IF NOT EXISTS idx_user_accounts_status
                 ON {USER_TABLE}(status, created_at DESC);
 
+                CREATE TABLE IF NOT EXISTS {USER_ROLE_TABLE} (
+                    sequence_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    role TEXT NOT NULL
+                        CHECK (role IN ('admin', 'auditor', 'user')),
+                    created_at TEXT NOT NULL,
+                    UNIQUE(user_id, role),
+                    FOREIGN KEY(user_id)
+                        REFERENCES {USER_TABLE}(user_id)
+                        ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_user_account_roles_role
+                ON {USER_ROLE_TABLE}(role, user_id);
+
                 CREATE TABLE IF NOT EXISTS {SESSION_TABLE} (
                     sequence_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     session_id TEXT NOT NULL UNIQUE,
@@ -536,6 +558,19 @@ class SQLiteAuthenticationStore:
                 )
                 """
             )
+            now_text = self._now().isoformat()
+            connection.execute(
+                f"""
+                INSERT OR IGNORE INTO {USER_ROLE_TABLE} (
+                    user_id,
+                    role,
+                    created_at
+                )
+                SELECT user_id, ?, ?
+                FROM {USER_TABLE}
+                """,
+                (ROLE_USER, now_text),
+            )
 
     def create_user(
         self,
@@ -580,6 +615,15 @@ class SQLiteAuthenticationStore:
                         now_text,
                     ),
                 )
+                connection.execute(
+                    f"""
+                    INSERT INTO {USER_ROLE_TABLE} (
+                        user_id, role, created_at
+                    )
+                    VALUES (?, ?, ?)
+                    """,
+                    (user_id, ROLE_USER, now_text),
+                )
         except sqlite3.IntegrityError as exc:
             raise ValueError(
                 "An account with this email already exists."
@@ -604,8 +648,17 @@ class SQLiteAuthenticationStore:
                 f"SELECT * FROM {USER_TABLE} WHERE user_id = ?",
                 (user_id,),
             ).fetchone()
+            roles = (
+                self._get_user_roles_locked(
+                    connection, user_id
+                )
+                if row is not None
+                else ()
+            )
 
-        return self._user_row_to_dict(row)
+        return self._user_row_to_dict(
+            row, roles=roles
+        )
 
     def get_user_by_email(self, email: str) -> dict[str, Any] | None:
         normalized_email = normalize_email(email)
@@ -619,8 +672,17 @@ class SQLiteAuthenticationStore:
                 f"SELECT * FROM {USER_TABLE} WHERE email = ?",
                 (normalized_email,),
             ).fetchone()
+            roles = (
+                self._get_user_roles_locked(
+                    connection, row["user_id"]
+                )
+                if row is not None
+                else ()
+            )
 
-        return self._user_row_to_dict(row)
+        return self._user_row_to_dict(
+            row, roles=roles
+        )
 
     def verify_user_password(self, *, email: str, password: str) -> bool:
         normalized_email = normalize_email(email)
@@ -639,6 +701,402 @@ class SQLiteAuthenticationStore:
             return False
 
         return verify_password_hash(password, row["password_hash"])
+
+
+    def list_users(
+        self,
+        *,
+        status: str | None = None,
+        role: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        limit = self._validate_limit(limit)
+        conditions: list[str] = []
+        parameters: list[Any] = []
+
+        if status is not None:
+            status = self._validate_user_status(status)
+            conditions.append("u.status = ?")
+            parameters.append(status)
+
+        if role is not None:
+            role = validate_role(role)
+            conditions.append(
+                f"""
+                EXISTS (
+                    SELECT 1
+                    FROM {USER_ROLE_TABLE} r
+                    WHERE r.user_id = u.user_id
+                    AND r.role = ?
+                )
+                """
+            )
+            parameters.append(role)
+
+        where_clause = (
+            "WHERE " + " AND ".join(conditions)
+            if conditions
+            else ""
+        )
+        parameters.append(limit)
+
+        with self._connection() as connection:
+            self._unlock_expired_user_locks_locked(
+                connection
+            )
+            rows = connection.execute(
+                f"""
+                SELECT u.*
+                FROM {USER_TABLE} u
+                {where_clause}
+                ORDER BY u.sequence_id ASC
+                LIMIT ?
+                """,
+                tuple(parameters),
+            ).fetchall()
+            return [
+                self._user_row_to_dict(
+                    row,
+                    roles=self._get_user_roles_locked(
+                        connection, row["user_id"]
+                    ),
+                )
+                for row in rows
+            ]
+
+    def count_users(
+        self,
+        *,
+        status: str | None = None,
+        role: str | None = None,
+    ) -> int:
+        conditions: list[str] = []
+        parameters: list[Any] = []
+
+        if status is not None:
+            status = self._validate_user_status(status)
+            conditions.append("u.status = ?")
+            parameters.append(status)
+
+        if role is not None:
+            role = validate_role(role)
+            conditions.append(
+                f"""
+                EXISTS (
+                    SELECT 1
+                    FROM {USER_ROLE_TABLE} r
+                    WHERE r.user_id = u.user_id
+                    AND r.role = ?
+                )
+                """
+            )
+            parameters.append(role)
+
+        where_clause = (
+            "WHERE " + " AND ".join(conditions)
+            if conditions
+            else ""
+        )
+
+        with self._connection() as connection:
+            self._unlock_expired_user_locks_locked(
+                connection
+            )
+            row = connection.execute(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM {USER_TABLE} u
+                {where_clause}
+                """,
+                tuple(parameters),
+            ).fetchone()
+
+        return int(row["total"])
+
+    def assign_user_role(
+        self,
+        *,
+        user_id: str,
+        role: str,
+    ) -> dict[str, Any]:
+        user_id = self._validate_text(
+            user_id, "User ID", 128
+        )
+        role = validate_role(role)
+        now_text = self._now().isoformat()
+
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            exists = connection.execute(
+                f"SELECT 1 FROM {USER_TABLE} WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+
+            if exists is None:
+                raise KeyError(
+                    f"User account was not found: {user_id}"
+                )
+
+            cursor = connection.execute(
+                f"""
+                INSERT OR IGNORE INTO {USER_ROLE_TABLE} (
+                    user_id, role, created_at
+                )
+                VALUES (?, ?, ?)
+                """,
+                (user_id, role, now_text),
+            )
+            changed = int(cursor.rowcount) > 0
+
+            if changed:
+                connection.execute(
+                    f"""
+                    UPDATE {USER_TABLE}
+                    SET updated_at = ?
+                    WHERE user_id = ?
+                    """,
+                    (now_text, user_id),
+                )
+
+        user = self.get_user(user_id)
+
+        if user is None:
+            raise RuntimeError(
+                "Updated user account could not be loaded."
+            )
+
+        return {
+            "user": user,
+            "changed": changed,
+            "role": role,
+        }
+
+    def remove_user_role_by_administrator(
+        self,
+        *,
+        actor_user_id: str,
+        user_id: str,
+        role: str,
+    ) -> dict[str, Any]:
+        actor_user_id = self._validate_text(
+            actor_user_id, "Actor user ID", 128
+        )
+        user_id = self._validate_text(
+            user_id, "User ID", 128
+        )
+        role = validate_role(role)
+
+        if role == ROLE_USER:
+            raise PermissionError(
+                "The baseline user role cannot be removed."
+            )
+
+        if (
+            role == ROLE_ADMIN
+            and secrets.compare_digest(
+                actor_user_id, user_id
+            )
+        ):
+            raise PermissionError(
+                "Administrators cannot remove their own admin role."
+            )
+
+        now_text = self._now().isoformat()
+
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                f"""
+                SELECT status
+                FROM {USER_TABLE}
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+
+            if row is None:
+                raise KeyError(
+                    f"User account was not found: {user_id}"
+                )
+
+            existing = connection.execute(
+                f"""
+                SELECT 1
+                FROM {USER_ROLE_TABLE}
+                WHERE user_id = ? AND role = ?
+                """,
+                (user_id, role),
+            ).fetchone()
+
+            if existing is None:
+                changed = False
+            else:
+                if (
+                    role == ROLE_ADMIN
+                    and row["status"] == "active"
+                    and self._count_active_admins_locked(
+                        connection
+                    ) <= 1
+                ):
+                    raise PermissionError(
+                        "The final active administrator role cannot be removed."
+                    )
+
+                cursor = connection.execute(
+                    f"""
+                    DELETE FROM {USER_ROLE_TABLE}
+                    WHERE user_id = ? AND role = ?
+                    """,
+                    (user_id, role),
+                )
+                changed = int(cursor.rowcount) > 0
+
+                if changed:
+                    connection.execute(
+                        f"""
+                        UPDATE {USER_TABLE}
+                        SET updated_at = ?
+                        WHERE user_id = ?
+                        """,
+                        (now_text, user_id),
+                    )
+
+        user = self.get_user(user_id)
+
+        if user is None:
+            raise RuntimeError(
+                "Updated user account could not be loaded."
+            )
+
+        return {
+            "user": user,
+            "changed": changed,
+            "role": role,
+        }
+
+    def set_user_status_by_administrator(
+        self,
+        *,
+        actor_user_id: str,
+        user_id: str,
+        status: str,
+        allowed_current_statuses: set[str],
+    ) -> dict[str, Any]:
+        actor_user_id = self._validate_text(
+            actor_user_id, "Actor user ID", 128
+        )
+        user_id = self._validate_text(
+            user_id, "User ID", 128
+        )
+        status = self._validate_user_status(status)
+
+        if not isinstance(
+            allowed_current_statuses, set
+        ) or not allowed_current_statuses:
+            raise ValueError(
+                "Allowed current statuses cannot be empty."
+            )
+
+        allowed = {
+            self._validate_user_status(value)
+            for value in allowed_current_statuses
+        }
+
+        if (
+            status != "active"
+            and secrets.compare_digest(
+                actor_user_id, user_id
+            )
+        ):
+            raise PermissionError(
+                "Administrators cannot disable or lock their own account."
+            )
+
+        now_text = self._now().isoformat()
+        revoked_sessions = 0
+
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                f"""
+                SELECT status
+                FROM {USER_TABLE}
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+
+            if row is None:
+                raise KeyError(
+                    f"User account was not found: {user_id}"
+                )
+
+            current_status = row["status"]
+
+            if current_status not in allowed:
+                raise ValueError(
+                    "Account status transition is not allowed."
+                )
+
+            roles = self._get_user_roles_locked(
+                connection, user_id
+            )
+
+            if (
+                status != "active"
+                and current_status == "active"
+                and ROLE_ADMIN in roles
+                and self._count_active_admins_locked(
+                    connection
+                ) <= 1
+            ):
+                raise PermissionError(
+                    "The final active administrator account cannot be disabled."
+                )
+
+            connection.execute(
+                f"""
+                UPDATE {USER_TABLE}
+                SET
+                    status = ?,
+                    failed_login_count = 0,
+                    failed_login_window_started_at = NULL,
+                    last_failed_login_at = NULL,
+                    locked_until = NULL,
+                    updated_at = ?
+                WHERE user_id = ?
+                """,
+                (status, now_text, user_id),
+            )
+
+            if status != "active":
+                cursor = connection.execute(
+                    f"""
+                    UPDATE {SESSION_TABLE}
+                    SET
+                        status = 'revoked',
+                        updated_at = ?,
+                        revoked_at = COALESCE(revoked_at, ?)
+                    WHERE user_id = ? AND status = 'active'
+                    """,
+                    (now_text, now_text, user_id),
+                )
+                revoked_sessions = int(
+                    cursor.rowcount
+                )
+
+        user = self.get_user(user_id)
+
+        if user is None:
+            raise RuntimeError(
+                "Updated user account could not be loaded."
+            )
+
+        return {
+            "user": user,
+            "previous_status": current_status,
+            "revoked_sessions": revoked_sessions,
+        }
 
 
     def get_login_protection_state(
@@ -2847,7 +3305,48 @@ class SQLiteAuthenticationStore:
                 f"DELETE FROM {ACCOUNT_ACTION_TOKEN_TABLE}"
             )
             connection.execute(f"DELETE FROM {SESSION_TABLE}")
+            connection.execute(f"DELETE FROM {USER_ROLE_TABLE}")
             connection.execute(f"DELETE FROM {USER_TABLE}")
+
+
+    def _get_user_roles_locked(
+        self,
+        connection: sqlite3.Connection,
+        user_id: str,
+    ) -> tuple[str, ...]:
+        rows = connection.execute(
+            f"""
+            SELECT role
+            FROM {USER_ROLE_TABLE}
+            WHERE user_id = ?
+            ORDER BY role ASC
+            """,
+            (user_id,),
+        ).fetchall()
+
+        return tuple(
+            row["role"]
+            for row in rows
+            if row["role"] in ACCOUNT_ROLES
+        )
+
+    def _count_active_admins_locked(
+        self,
+        connection: sqlite3.Connection,
+    ) -> int:
+        row = connection.execute(
+            f"""
+            SELECT COUNT(DISTINCT u.user_id) AS total
+            FROM {USER_TABLE} u
+            JOIN {USER_ROLE_TABLE} r
+                ON r.user_id = u.user_id
+            WHERE u.status = 'active'
+            AND r.role = ?
+            """,
+            (ROLE_ADMIN,),
+        ).fetchone()
+
+        return int(row["total"])
 
 
     def _expire_two_factor_challenges_locked(
@@ -3067,7 +3566,11 @@ class SQLiteAuthenticationStore:
         return current.astimezone(timezone.utc)
 
     @staticmethod
-    def _user_row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    def _user_row_to_dict(
+        row: sqlite3.Row | None,
+        *,
+        roles: tuple[str, ...] = (),
+    ) -> dict[str, Any] | None:
         if row is None:
             return None
 
@@ -3076,6 +3579,7 @@ class SQLiteAuthenticationStore:
             "email": row["email"],
             "display_name": row["display_name"],
             "status": row["status"],
+            "roles": list(roles),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "last_login_at": row["last_login_at"],
@@ -3446,6 +3950,7 @@ __all__ = [
     "TWO_FACTOR_CHALLENGE_TABLE",
     "TWO_FACTOR_RECOVERY_CODE_TABLE",
     "SQLiteAuthenticationStore",
+    "USER_ROLE_TABLE",
     "USER_STATUSES",
     "USER_TABLE",
     "authentication_store",

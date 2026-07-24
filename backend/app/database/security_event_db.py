@@ -28,6 +28,8 @@ SECURITY_EVENT_TYPES = {
     "invalid_token",
     "authentication_cooldown_started",
     "authentication_cooldown_blocked",
+    "authorization_denied",
+    "account_administration",
     "rate_limit_exceeded",
     "owner_mismatch",
     "security_configuration_error",
@@ -266,80 +268,154 @@ class SQLiteSecurityEventStore:
                 SECURITY_SEVERITIES
             )
         )
+        table_sql = f"""
+            CREATE TABLE {SECURITY_EVENT_TABLE} (
+                sequence_id INTEGER
+                    PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT NOT NULL UNIQUE,
+                event_type TEXT NOT NULL
+                    CHECK (
+                        event_type IN ({event_values})
+                    ),
+                severity TEXT NOT NULL
+                    CHECK (
+                        severity IN ({severity_values})
+                    ),
+                client_ref TEXT,
+                owner_id TEXT,
+                request_method TEXT,
+                request_path TEXT,
+                status_code INTEGER
+                    CHECK (
+                        status_code IS NULL
+                        OR status_code BETWEEN 100 AND 599
+                    ),
+                retry_after_seconds INTEGER
+                    CHECK (
+                        retry_after_seconds IS NULL
+                        OR retry_after_seconds >= 0
+                    ),
+                message TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{{}}',
+                created_at TEXT NOT NULL
+            )
+        """
+        index_sql = f"""
+            CREATE INDEX IF NOT EXISTS
+                idx_security_event_type
+            ON {SECURITY_EVENT_TABLE}(
+                event_type,
+                sequence_id DESC
+            );
+
+            CREATE INDEX IF NOT EXISTS
+                idx_security_event_severity
+            ON {SECURITY_EVENT_TABLE}(
+                severity,
+                sequence_id DESC
+            );
+
+            CREATE INDEX IF NOT EXISTS
+                idx_security_event_client
+            ON {SECURITY_EVENT_TABLE}(
+                client_ref,
+                sequence_id DESC
+            );
+
+            CREATE INDEX IF NOT EXISTS
+                idx_security_event_owner
+            ON {SECURITY_EVENT_TABLE}(
+                owner_id,
+                sequence_id DESC
+            );
+
+            CREATE INDEX IF NOT EXISTS
+                idx_security_event_created
+            ON {SECURITY_EVENT_TABLE}(
+                created_at DESC
+            );
+        """
 
         with self._connect() as connection:
             connection.execute(
                 "PRAGMA journal_mode = WAL"
             )
-            connection.executescript(
-                f"""
-                CREATE TABLE IF NOT EXISTS
-                    {SECURITY_EVENT_TABLE} (
-                        sequence_id INTEGER
-                            PRIMARY KEY AUTOINCREMENT,
-                        event_id TEXT NOT NULL UNIQUE,
-                        event_type TEXT NOT NULL
-                            CHECK (
-                                event_type IN ({event_values})
-                            ),
-                        severity TEXT NOT NULL
-                            CHECK (
-                                severity IN ({severity_values})
-                            ),
-                        client_ref TEXT,
-                        owner_id TEXT,
-                        request_method TEXT,
-                        request_path TEXT,
-                        status_code INTEGER
-                            CHECK (
-                                status_code IS NULL
-                                OR status_code BETWEEN 100 AND 599
-                            ),
-                        retry_after_seconds INTEGER
-                            CHECK (
-                                retry_after_seconds IS NULL
-                                OR retry_after_seconds >= 0
-                            ),
-                        message TEXT,
-                        metadata_json TEXT NOT NULL DEFAULT '{{}}',
-                        created_at TEXT NOT NULL
-                    );
-
-                CREATE INDEX IF NOT EXISTS
-                    idx_security_event_type
-                ON {SECURITY_EVENT_TABLE}(
-                    event_type,
-                    sequence_id DESC
-                );
-
-                CREATE INDEX IF NOT EXISTS
-                    idx_security_event_severity
-                ON {SECURITY_EVENT_TABLE}(
-                    severity,
-                    sequence_id DESC
-                );
-
-                CREATE INDEX IF NOT EXISTS
-                    idx_security_event_client
-                ON {SECURITY_EVENT_TABLE}(
-                    client_ref,
-                    sequence_id DESC
-                );
-
-                CREATE INDEX IF NOT EXISTS
-                    idx_security_event_owner
-                ON {SECURITY_EVENT_TABLE}(
-                    owner_id,
-                    sequence_id DESC
-                );
-
-                CREATE INDEX IF NOT EXISTS
-                    idx_security_event_created
-                ON {SECURITY_EVENT_TABLE}(
-                    created_at DESC
-                );
+            existing = connection.execute(
                 """
-            )
+                SELECT sql
+                FROM sqlite_master
+                WHERE type = 'table'
+                AND name = ?
+                """,
+                (SECURITY_EVENT_TABLE,),
+            ).fetchone()
+
+            if existing is None:
+                connection.execute(table_sql)
+            else:
+                existing_sql = str(
+                    existing["sql"] or ""
+                )
+                supports_all_types = all(
+                    f"'{event_type}'" in existing_sql
+                    for event_type in SECURITY_EVENT_TYPES
+                )
+
+                if not supports_all_types:
+                    legacy_table = (
+                        SECURITY_EVENT_TABLE
+                        + "__legacy_event_types"
+                    )
+                    connection.execute(
+                        f"DROP TABLE IF EXISTS {legacy_table}"
+                    )
+                    connection.execute(
+                        f"""
+                        ALTER TABLE {SECURITY_EVENT_TABLE}
+                        RENAME TO {legacy_table}
+                        """
+                    )
+                    connection.execute(table_sql)
+                    connection.execute(
+                        f"""
+                        INSERT INTO {SECURITY_EVENT_TABLE} (
+                            sequence_id,
+                            event_id,
+                            event_type,
+                            severity,
+                            client_ref,
+                            owner_id,
+                            request_method,
+                            request_path,
+                            status_code,
+                            retry_after_seconds,
+                            message,
+                            metadata_json,
+                            created_at
+                        )
+                        SELECT
+                            sequence_id,
+                            event_id,
+                            event_type,
+                            severity,
+                            client_ref,
+                            owner_id,
+                            request_method,
+                            request_path,
+                            status_code,
+                            retry_after_seconds,
+                            message,
+                            metadata_json,
+                            created_at
+                        FROM {legacy_table}
+                        ORDER BY sequence_id ASC
+                        """
+                    )
+                    connection.execute(
+                        f"DROP TABLE {legacy_table}"
+                    )
+
+            connection.executescript(index_sql)
 
     def append(
         self,

@@ -132,6 +132,14 @@ AUTH_TOKEN = os.getenv(
 
 AUTH_MINIMUM_TOKEN_LENGTH = 32
 
+# Static compatibility and deliberately disabled development authentication
+# retain administrative recovery access. Account-token permissions are always
+# loaded from SQLite on every request instead of trusted from token claims.
+AUTH_STATIC_COMPATIBILITY_ROLES = os.getenv(
+    "MAMA_AUTH_STATIC_COMPATIBILITY_ROLES",
+    "admin,auditor,user",
+).strip() or "admin,auditor,user"
+
 
 ACCOUNT_AUTH_ENABLED = _environment_bool(
     "MAMA_ACCOUNT_AUTH_ENABLED",

@@ -15,6 +15,13 @@ from app.core.auth_tokens import (
     InvalidAccessTokenError,
     SignedAccessTokenCodec,
 )
+from app.core.rbac import (
+    PERMISSION_ACCOUNTS_MANAGE,
+    PERMISSION_ACCOUNTS_READ,
+    PERMISSION_ROLES_MANAGE,
+    has_permission,
+    validate_role,
+)
 from app.core.two_factor import (
     build_otpauth_uri,
     derive_totp_secret,
@@ -146,6 +153,30 @@ class TwoFactorNotEnabledError(
     AuthenticationServiceError
 ):
     """Two-factor authentication is not enabled."""
+
+
+class AccountNotFoundError(
+    AuthenticationServiceError
+):
+    """An administrative account target was not found."""
+
+
+class AccountAdministrationConflictError(
+    AuthenticationServiceError
+):
+    """An administrative account change would violate safety rules."""
+
+
+class AccountAuthorizationError(
+    AuthenticationServiceError
+):
+    """The actor lacks the role required for an account operation."""
+
+
+class InvalidAccountRoleError(
+    AuthenticationServiceError
+):
+    """An account role was invalid."""
 
 
 class InvalidAccountAccessTokenError(
@@ -682,6 +713,243 @@ class AuthenticationService:
             **result,
             "recovery_codes": recovery_codes,
         }
+
+    def list_accounts(
+        self,
+        *,
+        actor_roles: tuple[str, ...] | list[str],
+        status: str | None = None,
+        role: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        self._require_account_read_permission(
+            actor_roles
+        )
+
+        try:
+            accounts = self._store.list_users(
+                status=status,
+                role=role,
+                limit=limit,
+            )
+            total = self._store.count_users(
+                status=status,
+                role=role,
+            )
+        except (TypeError, ValueError) as exc:
+            if "role" in str(exc).lower():
+                raise InvalidAccountRoleError(
+                    str(exc)
+                ) from exc
+            raise
+
+        return {
+            "accounts": accounts,
+            "total": total,
+            "limit": limit,
+        }
+
+    def get_account(
+        self,
+        *,
+        actor_roles: tuple[str, ...] | list[str],
+        user_id: str,
+    ) -> dict[str, Any]:
+        self._require_account_read_permission(
+            actor_roles
+        )
+
+        try:
+            user = self._store.get_user(
+                user_id
+            )
+        except (TypeError, ValueError) as exc:
+            raise AccountNotFoundError(
+                "Account was not found."
+            ) from exc
+
+        if user is None:
+            raise AccountNotFoundError(
+                "Account was not found."
+            )
+
+        return user
+
+    def assign_account_role(
+        self,
+        *,
+        actor_user_id: str,
+        actor_roles: tuple[str, ...] | list[str],
+        user_id: str,
+        role: str,
+    ) -> dict[str, Any]:
+        del actor_user_id
+        self._require_role_management_permission(
+            actor_roles
+        )
+
+        try:
+            role = validate_role(role)
+            return self._store.assign_user_role(
+                user_id=user_id,
+                role=role,
+            )
+        except KeyError as exc:
+            raise AccountNotFoundError(
+                "Account was not found."
+            ) from exc
+        except (TypeError, ValueError) as exc:
+            raise InvalidAccountRoleError(
+                str(exc)
+            ) from exc
+
+    def remove_account_role(
+        self,
+        *,
+        actor_user_id: str,
+        actor_roles: tuple[str, ...] | list[str],
+        user_id: str,
+        role: str,
+    ) -> dict[str, Any]:
+        self._require_role_management_permission(
+            actor_roles
+        )
+
+        try:
+            role = validate_role(role)
+            return self._store.remove_user_role_by_administrator(
+                actor_user_id=actor_user_id,
+                user_id=user_id,
+                role=role,
+            )
+        except KeyError as exc:
+            raise AccountNotFoundError(
+                "Account was not found."
+            ) from exc
+        except PermissionError as exc:
+            raise AccountAdministrationConflictError(
+                str(exc)
+            ) from exc
+        except (TypeError, ValueError) as exc:
+            raise InvalidAccountRoleError(
+                str(exc)
+            ) from exc
+
+    def enable_account(
+        self,
+        *,
+        actor_user_id: str,
+        actor_roles: tuple[str, ...] | list[str],
+        user_id: str,
+    ) -> dict[str, Any]:
+        return self._change_account_status(
+            actor_user_id=actor_user_id,
+            actor_roles=actor_roles,
+            user_id=user_id,
+            status="active",
+            allowed_current_statuses={"disabled"},
+        )
+
+    def disable_account(
+        self,
+        *,
+        actor_user_id: str,
+        actor_roles: tuple[str, ...] | list[str],
+        user_id: str,
+    ) -> dict[str, Any]:
+        return self._change_account_status(
+            actor_user_id=actor_user_id,
+            actor_roles=actor_roles,
+            user_id=user_id,
+            status="disabled",
+            allowed_current_statuses={"active", "locked"},
+        )
+
+    def unlock_account(
+        self,
+        *,
+        actor_user_id: str,
+        actor_roles: tuple[str, ...] | list[str],
+        user_id: str,
+    ) -> dict[str, Any]:
+        return self._change_account_status(
+            actor_user_id=actor_user_id,
+            actor_roles=actor_roles,
+            user_id=user_id,
+            status="active",
+            allowed_current_statuses={"locked"},
+        )
+
+    def _change_account_status(
+        self,
+        *,
+        actor_user_id: str,
+        actor_roles: tuple[str, ...] | list[str],
+        user_id: str,
+        status: str,
+        allowed_current_statuses: set[str],
+    ) -> dict[str, Any]:
+        self._require_account_manage_permission(
+            actor_roles
+        )
+
+        try:
+            return self._store.set_user_status_by_administrator(
+                actor_user_id=actor_user_id,
+                user_id=user_id,
+                status=status,
+                allowed_current_statuses=(
+                    allowed_current_statuses
+                ),
+            )
+        except KeyError as exc:
+            raise AccountNotFoundError(
+                "Account was not found."
+            ) from exc
+        except PermissionError as exc:
+            raise AccountAdministrationConflictError(
+                str(exc)
+            ) from exc
+        except ValueError as exc:
+            raise AccountAdministrationConflictError(
+                str(exc)
+            ) from exc
+
+    @staticmethod
+    def _require_account_read_permission(
+        actor_roles: tuple[str, ...] | list[str],
+    ) -> None:
+        if not has_permission(
+            actor_roles,
+            PERMISSION_ACCOUNTS_READ,
+        ):
+            raise AccountAuthorizationError(
+                "Account read permission is required."
+            )
+
+    @staticmethod
+    def _require_account_manage_permission(
+        actor_roles: tuple[str, ...] | list[str],
+    ) -> None:
+        if not has_permission(
+            actor_roles,
+            PERMISSION_ACCOUNTS_MANAGE,
+        ):
+            raise AccountAuthorizationError(
+                "Account management permission is required."
+            )
+
+    @staticmethod
+    def _require_role_management_permission(
+        actor_roles: tuple[str, ...] | list[str],
+    ) -> None:
+        if not has_permission(
+            actor_roles,
+            PERMISSION_ROLES_MANAGE,
+        ):
+            raise AccountAuthorizationError(
+                "Role management permission is required."
+            )
 
     def refresh(
         self,
@@ -1470,11 +1738,15 @@ authentication_service = AuthenticationService(
 
 
 __all__ = [
+    "AccountAdministrationConflictError",
+    "AccountAuthorizationError",
     "AccountExistsError",
+    "AccountNotFoundError",
     "AuthenticationConfigurationError",
     "AuthenticationService",
     "AuthenticationServiceError",
     "InvalidAccountAccessTokenError",
+    "InvalidAccountRoleError",
     "InvalidCredentialsError",
     "InvalidEmailVerificationTokenError",
     "InvalidRefreshTokenError",
