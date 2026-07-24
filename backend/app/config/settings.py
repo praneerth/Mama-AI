@@ -85,6 +85,33 @@ def _environment_int(
     return value
 
 
+def _environment_float(
+    name: str,
+    default: float,
+    *,
+    minimum: float = 0.0,
+) -> float:
+    raw_value = os.getenv(name)
+
+    if raw_value is None:
+        return float(default)
+
+    try:
+        value = float(raw_value.strip())
+
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{name} must be a number."
+        ) from exc
+
+    if value < minimum:
+        raise ValueError(
+            f"{name} must be at least {minimum}."
+        )
+
+    return value
+
+
 # =====================================================
 # Application
 # =====================================================
@@ -397,6 +424,83 @@ IDEMPOTENCY_CLEANUP_BATCH_SIZE = _environment_int(
 IDEMPOTENCY_STUCK_SECONDS = _environment_int(
     "MAMA_IDEMPOTENCY_STUCK_SECONDS",
     300,
+)
+
+
+# =====================================================
+# Production Observability
+# =====================================================
+
+OBSERVABILITY_ENABLED = _environment_bool(
+    "MAMA_OBSERVABILITY_ENABLED",
+    True,
+)
+
+METRICS_ENABLED = _environment_bool(
+    "MAMA_METRICS_ENABLED",
+    True,
+)
+
+LOG_LEVEL = os.getenv(
+    "LOG_LEVEL",
+    "INFO",
+).strip().upper() or "INFO"
+
+LOG_FORMAT = os.getenv(
+    "MAMA_LOG_FORMAT",
+    "json",
+).strip().lower() or "json"
+
+if LOG_FORMAT not in {"json", "text"}:
+    raise ValueError(
+        "MAMA_LOG_FORMAT must be either json or text."
+    )
+
+LOG_MAX_BYTES = _environment_int(
+    "MAMA_LOG_MAX_BYTES",
+    10 * 1024 * 1024,
+    minimum=1024,
+)
+
+LOG_BACKUP_COUNT = _environment_int(
+    "MAMA_LOG_BACKUP_COUNT",
+    5,
+    minimum=1,
+)
+
+OBSERVABILITY_REQUEST_ID_HEADER = os.getenv(
+    "MAMA_OBSERVABILITY_REQUEST_ID_HEADER",
+    "X-Request-ID",
+).strip() or "X-Request-ID"
+
+OBSERVABILITY_SLOW_REQUEST_MS = _environment_float(
+    "MAMA_OBSERVABILITY_SLOW_REQUEST_MS",
+    1000.0,
+    minimum=1.0,
+)
+
+OBSERVABILITY_ALERT_ERROR_RATE_PERCENT = _environment_float(
+    "MAMA_OBSERVABILITY_ALERT_ERROR_RATE_PERCENT",
+    5.0,
+    minimum=0.0,
+)
+
+OBSERVABILITY_ALERT_MIN_REQUESTS = _environment_int(
+    "MAMA_OBSERVABILITY_ALERT_MIN_REQUESTS",
+    20,
+    minimum=1,
+)
+
+OBSERVABILITY_ALERT_FAILED_QUEUE_JOBS = _environment_int(
+    "MAMA_OBSERVABILITY_ALERT_FAILED_QUEUE_JOBS",
+    1,
+    minimum=1,
+)
+
+OBSERVABILITY_ALERT_STALE_CLAIMS = _environment_int(
+    "MAMA_OBSERVABILITY_ALERT_STALE_CLAIMS",
+    1,
+    minimum=1,
 )
 
 
