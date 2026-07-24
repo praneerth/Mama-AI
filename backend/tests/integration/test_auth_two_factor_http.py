@@ -4,14 +4,17 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.api.auth import router as auth_router
 from app.config import settings
 from app.core.auth_service import authentication_service
 from app.core.two_factor import generate_totp_code
 from app.database.auth_db import SQLiteAuthenticationStore
 from app.middleware import rate_limit_store
-from main import app
+app = FastAPI()
+app.include_router(auth_router)
 
 
 class MutableClock:
