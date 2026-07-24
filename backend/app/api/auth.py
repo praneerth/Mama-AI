@@ -66,6 +66,8 @@ from app.core.device_security_service import (
 from app.core.rbac import (
     PERMISSION_ACCOUNTS_MANAGE,
     PERMISSION_ACCOUNTS_READ,
+    PERMISSION_DATABASE_RECOVERY_MANAGE,
+    PERMISSION_DATABASE_RECOVERY_READ,
     PERMISSION_RUNTIME_READ,
     PERMISSION_SECURITY_EVENTS_READ,
     has_permission,
@@ -1109,6 +1111,34 @@ def require_security_event_reader(
     return _require_permission(
         principal=principal,
         permission=PERMISSION_SECURITY_EVENTS_READ,
+        request=request,
+    )
+
+
+def require_database_recovery_reader(
+    request: Request,
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_principal),
+    ],
+) -> AuthenticatedPrincipal:
+    return _require_permission(
+        principal=principal,
+        permission=PERMISSION_DATABASE_RECOVERY_READ,
+        request=request,
+    )
+
+
+def require_database_recovery_administrator(
+    request: Request,
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_principal),
+    ],
+) -> AuthenticatedPrincipal:
+    return _require_permission(
+        principal=principal,
+        permission=PERMISSION_DATABASE_RECOVERY_MANAGE,
         request=request,
     )
 

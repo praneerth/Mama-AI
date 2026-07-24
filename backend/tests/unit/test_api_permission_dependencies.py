@@ -6,10 +6,14 @@ from starlette.requests import Request
 
 from app.api.auth import (
     AuthenticatedPrincipal,
+    require_database_recovery_administrator,
+    require_database_recovery_reader,
     require_runtime_reader,
     require_security_event_reader,
 )
 from app.core.rbac import (
+    PERMISSION_DATABASE_RECOVERY_MANAGE,
+    PERMISSION_DATABASE_RECOVERY_READ,
     PERMISSION_RUNTIME_READ,
     PERMISSION_SECURITY_EVENTS_READ,
     ROLE_ADMIN,
@@ -50,11 +54,22 @@ class TestAPIPermissionDependencies(unittest.TestCase):
             permissions = permissions_for_roles((ROLE_USER, role))
             self.assertIn(PERMISSION_RUNTIME_READ, permissions)
             self.assertIn(PERMISSION_SECURITY_EVENTS_READ, permissions)
+            self.assertIn(PERMISSION_DATABASE_RECOVERY_READ, permissions)
+        self.assertIn(
+            PERMISSION_DATABASE_RECOVERY_MANAGE,
+            permissions_for_roles((ROLE_USER, ROLE_ADMIN)),
+        )
+        self.assertNotIn(
+            PERMISSION_DATABASE_RECOVERY_MANAGE,
+            permissions_for_roles((ROLE_USER, ROLE_AUDITOR)),
+        )
 
     def test_user_role_has_no_operational_permissions(self) -> None:
         permissions = permissions_for_roles((ROLE_USER,))
         self.assertNotIn(PERMISSION_RUNTIME_READ, permissions)
         self.assertNotIn(PERMISSION_SECURITY_EVENTS_READ, permissions)
+        self.assertNotIn(PERMISSION_DATABASE_RECOVERY_READ, permissions)
+        self.assertNotIn(PERMISSION_DATABASE_RECOVERY_MANAGE, permissions)
 
     def test_auditor_can_read_runtime_and_security_events(self) -> None:
         principal = self.principal(ROLE_USER, ROLE_AUDITOR)
@@ -71,6 +86,30 @@ class TestAPIPermissionDependencies(unittest.TestCase):
                 principal,
             ),
             principal,
+        )
+
+    def test_auditor_can_read_recovery_but_only_admin_can_manage(self) -> None:
+        auditor = self.principal(ROLE_USER, ROLE_AUDITOR)
+        admin = self.principal(ROLE_USER, ROLE_ADMIN)
+        self.assertIs(
+            require_database_recovery_reader(
+                request_for("/admin/database/status"),
+                auditor,
+            ),
+            auditor,
+        )
+        with self.assertRaises(HTTPException) as context:
+            require_database_recovery_administrator(
+                request_for("/admin/database/backups"),
+                auditor,
+            )
+        self.assertEqual(context.exception.status_code, 403)
+        self.assertIs(
+            require_database_recovery_administrator(
+                request_for("/admin/database/backups"),
+                admin,
+            ),
+            admin,
         )
 
     def test_user_denial_is_audited_without_secret_data(self) -> None:

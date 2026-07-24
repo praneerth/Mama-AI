@@ -526,6 +526,69 @@ DATABASE_PATH = DATABASE_DIR / DATABASE_NAME
 
 
 # =====================================================
+# Database Migration and Recovery
+# =====================================================
+
+DATABASE_MIGRATIONS_ENABLED = _environment_bool(
+    "MAMA_DATABASE_MIGRATIONS_ENABLED",
+    True,
+)
+
+DATABASE_BACKUP_ENABLED = _environment_bool(
+    "MAMA_DATABASE_BACKUP_ENABLED",
+    True,
+)
+
+_database_backup_dir_value = Path(
+    os.getenv(
+        "MAMA_DATABASE_BACKUP_DIR",
+        str(DATA_DIR / "backups"),
+    )
+).expanduser()
+
+DATABASE_BACKUP_DIR = (
+    _database_backup_dir_value
+    if _database_backup_dir_value.is_absolute()
+    else BASE_DIR / _database_backup_dir_value
+).resolve()
+
+DATABASE_BACKUP_RETENTION_COUNT = _environment_int(
+    "MAMA_DATABASE_BACKUP_RETENTION_COUNT",
+    14,
+    minimum=1,
+)
+
+DATABASE_BACKUP_INTERVAL_SECONDS = _environment_int(
+    "MAMA_DATABASE_BACKUP_INTERVAL_SECONDS",
+    21600,
+    minimum=60,
+)
+
+DATABASE_BACKUP_MIN_INTERVAL_SECONDS = _environment_int(
+    "MAMA_DATABASE_BACKUP_MIN_INTERVAL_SECONDS",
+    3600,
+    minimum=60,
+)
+
+DATABASE_BACKUP_ON_STARTUP = _environment_bool(
+    "MAMA_DATABASE_BACKUP_ON_STARTUP",
+    False,
+)
+
+DATABASE_INTEGRITY_CHECK_MODE = os.getenv(
+    "MAMA_DATABASE_INTEGRITY_CHECK_MODE",
+    "quick",
+).strip().lower() or "quick"
+
+if DATABASE_INTEGRITY_CHECK_MODE not in {"quick", "full"}:
+    raise ValueError(
+        "MAMA_DATABASE_INTEGRITY_CHECK_MODE must be quick or full."
+    )
+
+os.makedirs(DATABASE_BACKUP_DIR, exist_ok=True)
+
+
+# =====================================================
 # AI
 # =====================================================
 
