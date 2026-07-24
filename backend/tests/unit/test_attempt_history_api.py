@@ -105,6 +105,7 @@ class TestAttemptHistoryAPI(
         mock_list.assert_called_once_with(
             task_id="task-1",
             event_type="claimed",
+            owner_id="local-user",
             limit=25,
         )
 
@@ -154,7 +155,8 @@ class TestAttemptHistoryAPI(
         )
 
         mock_get.assert_called_once_with(
-            "audit-1"
+            "audit-1",
+            owner_id="local-user",
         )
 
     @patch(
@@ -242,6 +244,7 @@ class TestAttemptHistoryAPI(
 
         mock_audit_list.assert_called_once_with(
             task_id=request.task_id,
+            owner_id="local-user",
             limit=50,
         )
 

@@ -133,11 +133,20 @@ class MamaEngine:
     def _ensure_registered(
         self,
         request: TaskRequest,
+        owner_id: str,
     ) -> TaskRecord:
         existing = self._task_registry.get(request.task_id)
 
         if existing is None:
             return self._task_registry.register(request)
+
+        if (
+            existing.owner_id != owner_id
+            and existing.owner_id != "local-user"
+        ):
+            raise PermissionError(
+                "Task is owned by another account."
+            )
 
         if existing.status in {
             TaskStatus.PENDING,
@@ -510,8 +519,12 @@ class MamaEngine:
             )
 
             request.risk_level = assessment.risk_level
+            request.metadata["owner_id"] = resolved_owner
 
-            self._ensure_registered(request)
+            self._ensure_registered(
+                request,
+                resolved_owner,
+            )
 
         except Exception as exc:
             result = TaskResult.failed(

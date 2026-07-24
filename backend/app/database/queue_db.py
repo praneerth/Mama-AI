@@ -146,6 +146,36 @@ class SQLiteTaskQueueStore:
                 """
             )
 
+            tables = {
+                row["name"]
+                for row in connection.execute(
+                    """
+                    SELECT name
+                    FROM sqlite_master
+                    WHERE type = 'table'
+                    """
+                ).fetchall()
+            }
+
+            if ATTEMPT_AUDIT_TABLE in tables:
+                connection.execute(
+                    f"""
+                    UPDATE {ATTEMPT_AUDIT_TABLE}
+                    SET owner_id = (
+                        SELECT owner_id
+                        FROM {QUEUE_TABLE}
+                        WHERE {QUEUE_TABLE}.task_id =
+                              {ATTEMPT_AUDIT_TABLE}.task_id
+                    )
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM {QUEUE_TABLE}
+                        WHERE {QUEUE_TABLE}.task_id =
+                              {ATTEMPT_AUDIT_TABLE}.task_id
+                    )
+                    """
+                )
+
     def enqueue(
         self,
         task_id: str,
@@ -219,6 +249,7 @@ class SQLiteTaskQueueStore:
 
             self._audit.append(
                 task_id=task_id,
+                owner_id=owner_id,
                 attempt=0,
                 event_type=audit_event_type,
                 queue_status="queued",
@@ -340,6 +371,7 @@ class SQLiteTaskQueueStore:
 
                 self._audit.append(
                     task_id=exhausted["task_id"],
+                    owner_id=exhausted["owner_id"],
                     attempt=int(exhausted["attempts"]),
                     event_type="failed",
                     queue_status="failed",
@@ -426,6 +458,7 @@ class SQLiteTaskQueueStore:
 
             self._audit.append(
                 task_id=task_id,
+                owner_id=claimed["owner_id"],
                 attempt=int(claimed["attempts"]),
                 event_type="claimed",
                 queue_status="claimed",
@@ -514,6 +547,7 @@ class SQLiteTaskQueueStore:
 
             self._audit.append(
                 task_id=task_id,
+                owner_id=current["owner_id"],
                 attempt=int(current["attempts"]),
                 event_type="completed",
                 queue_status="completed",
@@ -663,6 +697,7 @@ class SQLiteTaskQueueStore:
 
             self._audit.append(
                 task_id=task_id,
+                owner_id=row["owner_id"],
                 attempt=int(row["attempts"]),
                 event_type=(
                     audit_event_type
@@ -796,6 +831,7 @@ class SQLiteTaskQueueStore:
 
             self._audit.append(
                 task_id=task_id,
+                owner_id=row["owner_id"],
                 attempt=0,
                 event_type="manually_retried",
                 queue_status="queued",
@@ -905,6 +941,7 @@ class SQLiteTaskQueueStore:
 
             self._audit.append(
                 task_id=task_id,
+                owner_id=row["owner_id"],
                 attempt=int(row["attempts"]),
                 event_type="cancelled",
                 queue_status="cancelled",
@@ -1008,6 +1045,7 @@ class SQLiteTaskQueueStore:
 
             self._audit.append(
                 task_id=task_id,
+                owner_id=row["owner_id"],
                 attempt=int(row["attempts"]),
                 event_type=audit_event_type,
                 queue_status="cancelled",
@@ -1155,6 +1193,7 @@ class SQLiteTaskQueueStore:
 
             created = self._audit.append(
                 task_id=task_id,
+                owner_id=row["owner_id"],
                 attempt=int(row["attempts"]),
                 event_type="reconciled",
                 queue_status=row["status"],

@@ -1,5 +1,5 @@
 """
-Authenticated single-owner memory API.
+Authenticated owner-scoped memory API.
 """
 
 from __future__ import annotations
@@ -30,15 +30,13 @@ class MemoryPayload(BaseModel):
 @router.get("/memory")
 def get_memory():
     """
-    Return memories for the current single-owner deployment.
+    Return memories owned by the authenticated principal.
 
-    The memory table does not yet contain owner_id, so bearer
-    authentication protects the complete local memory collection.
+    The database helper resolves the request-local principal and applies
+    the owner filter before reading any rows.
     """
 
-    memories = (
-        memory_db.get_all_memories()
-    )
+    memories = memory_db.get_all_memories()
 
     serialized = []
 

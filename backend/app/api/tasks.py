@@ -77,6 +77,26 @@ def _clean_task_id(
 
     return task_id
 
+def _get_owned_task(
+    task_id: str,
+    *,
+    resource_name: str = "Task",
+):
+    record = engine.registry.get(task_id)
+
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"{resource_name} was not found: {task_id}",
+        )
+
+    require_resource_owner(
+        record.owner_id,
+        resource_name=resource_name,
+    )
+
+    return record
+
 
 def _require_queue_owner(
     queue_record: dict[str, Any],
@@ -150,55 +170,24 @@ def list_tasks(
     ] = 20,
 ) -> dict[str, Any]:
     """
-    Return recent tasks visible to the authenticated local owner.
+    Return recent tasks owned by the authenticated principal.
 
-    Unqueued legacy tasks remain visible in the current single-owner
-    deployment. Queue-backed tasks are filtered by durable owner.
+    Both in-memory and durable task-state records are filtered by the
+    request-local owner identity.
     """
 
+    owner_id = resolve_requested_owner(None)
     records = engine.registry.list(
         status=status,
+        owner_id=owner_id,
         limit=limit,
     )
 
-    accessible_records = []
-
-    for record in records:
-        queue_record = (
-            task_queue_store.get(
-                record.task_id
-            )
-        )
-
-        if queue_record is None:
-            accessible_records.append(
-                record
-            )
-            continue
-
-        try:
-            _require_queue_owner(
-                queue_record
-            )
-
-        except HTTPException:
-            continue
-
-        accessible_records.append(
-            record
-        )
-
     return {
         "success": True,
-        "count": len(
-            accessible_records
-        ),
+        "count": len(records),
         "tasks": jsonable_encoder(
-            [
-                record.to_dict()
-                for record
-                in accessible_records
-            ]
+            [record.to_dict() for record in records]
         ),
     }
 
@@ -206,22 +195,23 @@ def list_tasks(
 @router.get("/summary")
 def task_summary() -> dict[str, Any]:
     """
-    Return task-state counts.
-
-    The registry is still a single-owner store. Owner-scoped task-state
-    persistence will be introduced before multi-user authentication.
+    Return task-state counts for the authenticated principal.
     """
 
+    owner_id = resolve_requested_owner(None)
     counts = {
         status.value: engine.registry.count(
-            status=status
+            status=status,
+            owner_id=owner_id,
         )
         for status in TaskStatus
     }
 
     return {
         "success": True,
-        "total": engine.registry.count(),
+        "total": engine.registry.count(
+            owner_id=owner_id
+        ),
         "counts": counts,
     }
 
@@ -340,17 +330,7 @@ def get_task_attempts(
         task_id
     )
 
-    task_record = engine.registry.get(
-        task_id
-    )
-
-    if task_record is None:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                f"Task was not found: {task_id}"
-            ),
-        )
+    task_record = _get_owned_task(task_id)
 
     queue_record = _get_owned_queue(
         task_id
@@ -411,17 +391,7 @@ def get_task_history(
         task_id
     )
 
-    task_record = engine.registry.get(
-        task_id
-    )
-
-    if task_record is None:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                f"Task was not found: {task_id}"
-            ),
-        )
+    task_record = _get_owned_task(task_id)
 
     queue_record = _get_owned_queue(
         task_id
@@ -431,6 +401,7 @@ def get_task_history(
         audit_records = (
             attempt_audit_store.list(
                 task_id=task_id,
+                owner_id=task_record.owner_id,
                 limit=limit,
             )
         )
@@ -569,17 +540,7 @@ def _retry_task_core(
 ) -> dict[str, Any]:
     """Execute the existing retry workflow after reservation."""
 
-    task_record = engine.registry.get(
-        task_id
-    )
-
-    if task_record is None:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                f"Task was not found: {task_id}"
-            ),
-        )
+    task_record = _get_owned_task(task_id)
 
     if (
         task_record.status
@@ -748,17 +709,7 @@ def _cancel_task_core(
 ) -> dict[str, Any]:
     """Execute the existing cancellation workflow after reservation."""
 
-    task_record = engine.registry.get(
-        task_id
-    )
-
-    if task_record is None:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                f"Task was not found: {task_id}"
-            ),
-        )
+    task_record = _get_owned_task(task_id)
 
     queue_record = _get_owned_queue(
         task_id
@@ -896,17 +847,7 @@ def get_task(
         task_id
     )
 
-    record = engine.registry.get(
-        task_id
-    )
-
-    if record is None:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                f"Task was not found: {task_id}"
-            ),
-        )
+    record = _get_owned_task(task_id)
 
     queue_record = task_queue_store.get(
         task_id

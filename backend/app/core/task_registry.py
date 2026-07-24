@@ -31,6 +31,7 @@ class TaskStateStore(Protocol):
         self,
         *,
         status: str | None = None,
+        owner_id: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         ...
@@ -77,6 +78,7 @@ class TaskRecord:
     source: str
     autonomy_level: int
     risk_level: RiskLevel
+    owner_id: str = "local-user"
     status: TaskStatus = TaskStatus.PENDING
     message: str = ""
     output: Any = None
@@ -98,6 +100,7 @@ class TaskRecord:
             source=request.source,
             autonomy_level=request.autonomy_level,
             risk_level=request.risk_level,
+            owner_id=cls._owner_from_request(request),
             created_at=request.created_at,
             updated_at=request.created_at,
         )
@@ -118,6 +121,9 @@ class TaskRecord:
             source=str(data["source"]),
             autonomy_level=int(data["autonomy_level"]),
             risk_level=RiskLevel(data["risk_level"]),
+            owner_id=cls._validate_owner_id(
+                data.get("owner_id", "local-user")
+            ),
             status=TaskStatus(data["status"]),
             message=str(data.get("message") or ""),
             output=deepcopy(data.get("output")),
@@ -141,6 +147,31 @@ class TaskRecord:
                 if data.get("finished_at") is not None
                 else None
             ),
+        )
+
+
+    @staticmethod
+    def _validate_owner_id(value: Any) -> str:
+        if not isinstance(value, str):
+            raise TypeError("Task owner ID must be text.")
+
+        value = value.strip()
+
+        if not value:
+            raise ValueError("Task owner ID cannot be empty.")
+
+        return value
+
+    @classmethod
+    def _owner_from_request(
+        cls,
+        request: TaskRequest,
+    ) -> str:
+        return cls._validate_owner_id(
+            request.metadata.get(
+                "owner_id",
+                "local-user",
+            )
         )
 
     def transition(
@@ -460,6 +491,7 @@ class TaskRegistry:
         self,
         *,
         status: TaskStatus | str | None = None,
+        owner_id: str | None = None,
         limit: int | None = None,
     ) -> list[TaskRecord]:
         if limit is not None:
@@ -479,6 +511,12 @@ class TaskRegistry:
             else None
         )
 
+        required_owner = (
+            TaskRecord._validate_owner_id(owner_id)
+            if owner_id is not None
+            else None
+        )
+
         with self._lock:
             records = list(
                 self._records.values()
@@ -490,6 +528,14 @@ class TaskRegistry:
                     for record in records
                     if record.status
                     == required_status
+                ]
+
+            if required_owner is not None:
+                records = [
+                    record
+                    for record in records
+                    if record.owner_id
+                    == required_owner
                 ]
 
             records.sort(
@@ -507,9 +553,14 @@ class TaskRegistry:
     def count(
         self,
         status: TaskStatus | str | None = None,
+        *,
+        owner_id: str | None = None,
     ) -> int:
         return len(
-            self.list(status=status)
+            self.list(
+                status=status,
+                owner_id=owner_id,
+            )
         )
 
     def clear(self) -> None:

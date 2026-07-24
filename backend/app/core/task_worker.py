@@ -163,6 +163,15 @@ class DurableTaskWorker:
                     f"Task record was not found: {task_id}"
                 )
 
+            if (
+                task_record.owner_id != owner_id
+                and task_record.owner_id != "local-user"
+            ):
+                raise PermissionError(
+                    "Task state owner does not match the durable "
+                    "queue owner."
+                )
+
             if task_record.status == TaskStatus.CANCELLED:
                 queue_record = self._queue.cancel(
                     task_id

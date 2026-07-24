@@ -102,12 +102,41 @@ def initialize_database():
 
         id INTEGER PRIMARY KEY AUTOINCREMENT,
 
+        owner_id TEXT NOT NULL DEFAULT 'local-user',
+
         title TEXT,
 
         content TEXT,
 
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
+    """)
+
+    memory_columns = {
+        row["name"]
+        for row in cursor.execute(
+            "PRAGMA table_info(memory)"
+        ).fetchall()
+    }
+
+    if "owner_id" not in memory_columns:
+        cursor.execute("""
+        ALTER TABLE memory
+        ADD COLUMN owner_id TEXT NOT NULL
+        DEFAULT 'local-user'
+        """)
+
+    cursor.execute("""
+    UPDATE memory
+    SET owner_id = 'local-user'
+    WHERE owner_id IS NULL
+       OR TRIM(owner_id) = ''
+    """)
+
+    cursor.execute("""
+    CREATE INDEX IF NOT EXISTS
+        idx_memory_owner_created
+    ON memory(owner_id, id DESC)
     """)
 
     # -----------------------------
@@ -261,4 +290,4 @@ def print_tables():
 try:
     initialize_database()
 except Exception as e:
-    print("Database auto-initialization warning:", e)
+    print("Database auto-initialization warning:", e)

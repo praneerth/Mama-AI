@@ -104,6 +104,7 @@ class SQLiteStateStore:
                 f"""
                 CREATE TABLE IF NOT EXISTS {TASK_TABLE} (
                     task_id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL DEFAULT 'local-user',
                     command TEXT NOT NULL,
                     source TEXT NOT NULL,
                     autonomy_level INTEGER NOT NULL,
@@ -159,11 +160,75 @@ class SQLiteStateStore:
                 """
             )
 
+            task_columns = {
+                row["name"]
+                for row in connection.execute(
+                    f"PRAGMA table_info({TASK_TABLE})"
+                ).fetchall()
+            }
+
+            if "owner_id" not in task_columns:
+                connection.execute(
+                    f"""
+                    ALTER TABLE {TASK_TABLE}
+                    ADD COLUMN owner_id TEXT NOT NULL
+                    DEFAULT 'local-user'
+                    """
+                )
+
+            connection.execute(
+                f"""
+                UPDATE {TASK_TABLE}
+                SET owner_id = 'local-user'
+                WHERE owner_id IS NULL
+                   OR TRIM(owner_id) = ''
+                """
+            )
+
+            tables = {
+                row["name"]
+                for row in connection.execute(
+                    """
+                    SELECT name
+                    FROM sqlite_master
+                    WHERE type = 'table'
+                    """
+                ).fetchall()
+            }
+
+            if "task_queue" in tables:
+                connection.execute(
+                    f"""
+                    UPDATE {TASK_TABLE}
+                    SET owner_id = (
+                        SELECT owner_id
+                        FROM task_queue
+                        WHERE task_queue.task_id =
+                              {TASK_TABLE}.task_id
+                    )
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM task_queue
+                        WHERE task_queue.task_id =
+                              {TASK_TABLE}.task_id
+                    )
+                    """
+                )
+
+            connection.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS
+                    idx_task_state_owner_status
+                ON {TASK_TABLE}(owner_id, status)
+                """
+            )
+
     def save_task(self, record: Any) -> None:
         data = _to_mapping(record)
 
         required_fields = {
             "task_id",
+            "owner_id",
             "command",
             "source",
             "autonomy_level",
@@ -186,6 +251,7 @@ class SQLiteStateStore:
                 f"""
                 INSERT INTO {TASK_TABLE} (
                     task_id,
+                    owner_id,
                     command,
                     source,
                     autonomy_level,
@@ -200,8 +266,9 @@ class SQLiteStateStore:
                     started_at,
                     finished_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(task_id) DO UPDATE SET
+                    owner_id = excluded.owner_id,
                     command = excluded.command,
                     source = excluded.source,
                     autonomy_level = excluded.autonomy_level,
@@ -217,6 +284,10 @@ class SQLiteStateStore:
                 """,
                 (
                     str(data["task_id"]),
+                    self._validate_text(
+                        data["owner_id"],
+                        "Owner ID",
+                    ),
                     str(data["command"]),
                     str(data["source"]),
                     int(data["autonomy_level"]),
@@ -248,20 +319,33 @@ class SQLiteStateStore:
     def get_task(
         self,
         task_id: str,
+        *,
+        owner_id: str | None = None,
     ) -> dict[str, Any] | None:
         task_id = self._validate_text(
             task_id,
             "Task ID",
         )
 
+        parameters: list[Any] = [task_id]
+        owner_clause = ""
+
+        if owner_id is not None:
+            owner_id = self._validate_text(
+                owner_id,
+                "Owner ID",
+            )
+            owner_clause = " AND owner_id = ?"
+            parameters.append(owner_id)
+
         with self._connect() as connection:
             row = connection.execute(
                 f"""
                 SELECT *
                 FROM {TASK_TABLE}
-                WHERE task_id = ?
+                WHERE task_id = ?{owner_clause}
                 """,
-                (task_id,),
+                tuple(parameters),
             ).fetchone()
 
         return self._task_row_to_dict(row)
@@ -270,20 +354,35 @@ class SQLiteStateStore:
         self,
         *,
         status: str | None = None,
+        owner_id: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         limit = self._validate_limit(limit)
 
+        conditions: list[str] = []
         parameters: list[Any] = []
-        where_clause = ""
 
         if status is not None:
             status = self._validate_text(
                 status,
                 "Task status",
             )
-            where_clause = "WHERE status = ?"
+            conditions.append("status = ?")
             parameters.append(status)
+
+        if owner_id is not None:
+            owner_id = self._validate_text(
+                owner_id,
+                "Owner ID",
+            )
+            conditions.append("owner_id = ?")
+            parameters.append(owner_id)
+
+        where_clause = (
+            "WHERE " + " AND ".join(conditions)
+            if conditions
+            else ""
+        )
 
         parameters.append(limit)
 
@@ -500,6 +599,7 @@ class SQLiteStateStore:
 
         return {
             "task_id": row["task_id"],
+            "owner_id": row["owner_id"],
             "command": row["command"],
             "source": row["source"],
             "autonomy_level": row["autonomy_level"],

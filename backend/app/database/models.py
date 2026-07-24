@@ -52,6 +52,7 @@ class Goal:
 class Memory:
 
     id: Optional[int] = None
+    owner_id: str = "local-user"
     title: str = ""
     content: str = ""
     created_at: Optional[str] = None
@@ -137,6 +138,11 @@ def memory_from_row(row):
 
     return Memory(
         id=row["id"],
+        owner_id=(
+            row["owner_id"]
+            if "owner_id" in row.keys()
+            else "local-user"
+        ),
         title=row["title"],
         content=row["content"],
         created_at=row["created_at"],

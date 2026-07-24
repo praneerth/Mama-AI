@@ -155,6 +155,7 @@ class SQLiteAttemptAuditStore:
                             PRIMARY KEY AUTOINCREMENT,
                         audit_id TEXT NOT NULL UNIQUE,
                         task_id TEXT NOT NULL,
+                        owner_id TEXT NOT NULL DEFAULT 'local-user',
                         attempt INTEGER NOT NULL
                             CHECK (attempt >= 0),
                         event_type TEXT NOT NULL
@@ -199,10 +200,97 @@ class SQLiteAttemptAuditStore:
                 """
             )
 
+            columns = {
+                row["name"]
+                for row in connection.execute(
+                    f"PRAGMA table_info({ATTEMPT_AUDIT_TABLE})"
+                ).fetchall()
+            }
+
+            if "owner_id" not in columns:
+                connection.execute(
+                    f"""
+                    ALTER TABLE {ATTEMPT_AUDIT_TABLE}
+                    ADD COLUMN owner_id TEXT NOT NULL
+                    DEFAULT 'local-user'
+                    """
+                )
+
+            tables = {
+                row["name"]
+                for row in connection.execute(
+                    """
+                    SELECT name
+                    FROM sqlite_master
+                    WHERE type = 'table'
+                    """
+                ).fetchall()
+            }
+
+            connection.execute(
+                f"""
+                UPDATE {ATTEMPT_AUDIT_TABLE}
+                SET owner_id = 'local-user'
+                WHERE owner_id IS NULL
+                   OR TRIM(owner_id) = ''
+                """
+            )
+
+            if "task_queue" in tables:
+                connection.execute(
+                    f"""
+                    UPDATE {ATTEMPT_AUDIT_TABLE}
+                    SET owner_id = (
+                        SELECT owner_id
+                        FROM task_queue
+                        WHERE task_queue.task_id =
+                              {ATTEMPT_AUDIT_TABLE}.task_id
+                    )
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM task_queue
+                        WHERE task_queue.task_id =
+                              {ATTEMPT_AUDIT_TABLE}.task_id
+                    )
+                    """
+                )
+
+            if "task_state" in tables:
+                connection.execute(
+                    f"""
+                    UPDATE {ATTEMPT_AUDIT_TABLE}
+                    SET owner_id = (
+                        SELECT owner_id
+                        FROM task_state
+                        WHERE task_state.task_id =
+                              {ATTEMPT_AUDIT_TABLE}.task_id
+                    )
+                    WHERE owner_id = 'local-user'
+                      AND EXISTS (
+                        SELECT 1
+                        FROM task_state
+                        WHERE task_state.task_id =
+                              {ATTEMPT_AUDIT_TABLE}.task_id
+                    )
+                    """
+                )
+
+            connection.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS
+                    idx_attempt_audit_owner_created
+                ON {ATTEMPT_AUDIT_TABLE}(
+                    owner_id,
+                    sequence_id DESC
+                )
+                """
+            )
+
     def append(
         self,
         *,
         task_id: str,
+        owner_id: str = "local-user",
         attempt: int,
         event_type: str,
         queue_status: str,
@@ -223,6 +311,10 @@ class SQLiteAttemptAuditStore:
         task_id = self._validate_text(
             task_id,
             "Task ID",
+        )
+        owner_id = self._validate_text(
+            owner_id,
+            "Owner ID",
         )
         attempt = self._validate_attempt(
             attempt
@@ -287,6 +379,7 @@ class SQLiteAttemptAuditStore:
                 INSERT INTO {ATTEMPT_AUDIT_TABLE} (
                     audit_id,
                     task_id,
+                    owner_id,
                     attempt,
                     event_type,
                     queue_status,
@@ -296,11 +389,12 @@ class SQLiteAttemptAuditStore:
                     metadata_json,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     audit_id,
                     task_id,
+                    owner_id,
                     attempt,
                     event_type,
                     queue_status,
@@ -328,6 +422,7 @@ class SQLiteAttemptAuditStore:
         return {
             "audit_id": audit_id,
             "task_id": task_id,
+            "owner_id": owner_id,
             "attempt": attempt,
             "event_type": event_type,
             "queue_status": queue_status,
@@ -341,20 +436,33 @@ class SQLiteAttemptAuditStore:
     def get(
         self,
         audit_id: str,
+        *,
+        owner_id: str | None = None,
     ) -> dict[str, Any] | None:
         audit_id = self._validate_text(
             audit_id,
             "Audit ID",
         )
 
+        parameters: list[Any] = [audit_id]
+        owner_clause = ""
+
+        if owner_id is not None:
+            owner_id = self._validate_text(
+                owner_id,
+                "Owner ID",
+            )
+            owner_clause = " AND owner_id = ?"
+            parameters.append(owner_id)
+
         with self._connect() as connection:
             row = connection.execute(
                 f"""
                 SELECT *
                 FROM {ATTEMPT_AUDIT_TABLE}
-                WHERE audit_id = ?
+                WHERE audit_id = ?{owner_clause}
                 """,
-                (audit_id,),
+                tuple(parameters),
             ).fetchone()
 
         return self._row_to_dict(row)
@@ -364,6 +472,7 @@ class SQLiteAttemptAuditStore:
         *,
         task_id: str | None = None,
         event_type: str | None = None,
+        owner_id: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         limit = self._validate_limit(
@@ -400,6 +509,14 @@ class SQLiteAttemptAuditStore:
                 event_type
             )
 
+        if owner_id is not None:
+            owner_id = self._validate_text(
+                owner_id,
+                "Owner ID",
+            )
+            conditions.append("owner_id = ?")
+            parameters.append(owner_id)
+
         where_clause = ""
 
         if conditions:
@@ -434,6 +551,7 @@ class SQLiteAttemptAuditStore:
         *,
         task_id: str | None = None,
         event_type: str | None = None,
+        owner_id: str | None = None,
     ) -> int:
         conditions: list[str] = []
         parameters: list[Any] = []
@@ -464,6 +582,14 @@ class SQLiteAttemptAuditStore:
             parameters.append(
                 event_type
             )
+
+        if owner_id is not None:
+            owner_id = self._validate_text(
+                owner_id,
+                "Owner ID",
+            )
+            conditions.append("owner_id = ?")
+            parameters.append(owner_id)
 
         where_clause = ""
 
@@ -505,6 +631,7 @@ class SQLiteAttemptAuditStore:
         return {
             "audit_id": row["audit_id"],
             "task_id": row["task_id"],
+            "owner_id": row["owner_id"],
             "attempt": row["attempt"],
             "event_type": row["event_type"],
             "queue_status": row["queue_status"],

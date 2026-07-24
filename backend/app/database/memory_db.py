@@ -1,200 +1,164 @@
-from app.database.database import execute, fetch_one, fetch_all
+"""Owner-scoped SQLite memory helpers."""
+
+from __future__ import annotations
+
+from app.database.database import execute, fetch_all, fetch_one
 from app.database.models import memory_from_row, memories_from_rows
+from app.core.principal_context import get_current_principal
 
 
-# =====================================================
-# Add Memory
-# =====================================================
+LEGACY_OWNER_ID = "local-user"
 
-def add_memory(title, content):
 
+def _owner(owner_id: str | None) -> str:
+    if owner_id is None:
+        principal = get_current_principal()
+        candidate = getattr(principal, "owner_id", None)
+        owner_id = (
+            candidate
+            if isinstance(candidate, str)
+            else LEGACY_OWNER_ID
+        )
+    if not isinstance(owner_id, str):
+        raise TypeError("Owner ID must be text.")
+    owner_id = owner_id.strip()
+    if not owner_id:
+        raise ValueError("Owner ID cannot be empty.")
+    return owner_id
+
+
+def add_memory(title, content, *, owner_id: str | None = None):
+    owner_id = _owner(owner_id)
     execute(
         """
-        INSERT INTO memory(title, content)
-        VALUES(?, ?)
+        INSERT INTO memory(owner_id, title, content)
+        VALUES(?, ?, ?)
         """,
-        (title, content),
+        (owner_id, title, content),
     )
 
 
-# =====================================================
-# Get Memory
-# =====================================================
-
-def get_memory(memory_id):
-
+def get_memory(memory_id, *, owner_id: str | None = None):
+    owner_id = _owner(owner_id)
     row = fetch_one(
         """
         SELECT *
         FROM memory
-        WHERE id = ?
+        WHERE id = ? AND owner_id = ?
         """,
-        (memory_id,),
+        (memory_id, owner_id),
     )
-
     return memory_from_row(row)
 
 
-# =====================================================
-# Get All Memories
-# =====================================================
-
-def get_all_memories():
-
+def get_all_memories(*, owner_id: str | None = None):
+    owner_id = _owner(owner_id)
     rows = fetch_all(
         """
         SELECT *
         FROM memory
-        ORDER BY id DESC
-        """
-    )
-
-    return memories_from_rows(rows)
-
-
-# =====================================================
-# Search Memories
-# =====================================================
-
-def search_memories(keyword):
-
-    rows = fetch_all(
-        """
-        SELECT *
-        FROM memory
-        WHERE title LIKE ?
-           OR content LIKE ?
+        WHERE owner_id = ?
         ORDER BY id DESC
         """,
-        (
-            f"%{keyword}%",
-            f"%{keyword}%",
-        ),
+        (owner_id,),
     )
-
     return memories_from_rows(rows)
 
 
-# =====================================================
-# Update Memory
-# =====================================================
+def search_memories(keyword, *, owner_id: str | None = None):
+    owner_id = _owner(owner_id)
+    rows = fetch_all(
+        """
+        SELECT *
+        FROM memory
+        WHERE owner_id = ?
+          AND (title LIKE ? OR content LIKE ?)
+        ORDER BY id DESC
+        """,
+        (owner_id, f"%{keyword}%", f"%{keyword}%"),
+    )
+    return memories_from_rows(rows)
 
-def update_memory(memory_id, title, content):
 
+def update_memory(memory_id, title, content, *, owner_id: str | None = None):
+    owner_id = _owner(owner_id)
     execute(
         """
         UPDATE memory
-        SET title = ?,
-            content = ?
-        WHERE id = ?
+        SET title = ?, content = ?
+        WHERE id = ? AND owner_id = ?
         """,
-        (
-            title,
-            content,
-            memory_id,
-        ),
+        (title, content, memory_id, owner_id),
     )
 
 
-# =====================================================
-# Delete Memory
-# =====================================================
-
-def delete_memory(memory_id):
-
+def delete_memory(memory_id, *, owner_id: str | None = None):
+    owner_id = _owner(owner_id)
     execute(
         """
         DELETE FROM memory
-        WHERE id = ?
+        WHERE id = ? AND owner_id = ?
         """,
-        (memory_id,),
+        (memory_id, owner_id),
     )
 
 
-# =====================================================
-# Clear Memory
-# =====================================================
-
-def clear_memory():
-
-    execute(
-        """
-        DELETE FROM memory
-        """
-    )
+def clear_memory(*, owner_id: str | None = None):
+    owner_id = _owner(owner_id)
+    execute("DELETE FROM memory WHERE owner_id = ?", (owner_id,))
 
 
-# =====================================================
-# Count Memories
-# =====================================================
-
-def count_memories():
-
+def count_memories(*, owner_id: str | None = None):
+    owner_id = _owner(owner_id)
     row = fetch_one(
-        """
-        SELECT COUNT(*) AS total
-        FROM memory
-        """
+        "SELECT COUNT(*) AS total FROM memory WHERE owner_id = ?",
+        (owner_id,),
     )
-
     return row["total"]
 
 
-# =====================================================
-# Latest Memory
-# =====================================================
-
-def latest_memory():
-
+def latest_memory(*, owner_id: str | None = None):
+    owner_id = _owner(owner_id)
     row = fetch_one(
         """
-        SELECT *
-        FROM memory
-        ORDER BY id DESC
-        LIMIT 1
-        """
+        SELECT * FROM memory
+        WHERE owner_id = ?
+        ORDER BY id DESC LIMIT 1
+        """,
+        (owner_id,),
     )
-
     return memory_from_row(row)
 
 
-# =====================================================
-# Helper
-# =====================================================
-
-def memory_exists(memory_id):
-
-    return get_memory(memory_id) is not None
+def memory_exists(memory_id, *, owner_id: str | None = None):
+    return get_memory(memory_id, owner_id=owner_id) is not None
 
 
-def recent_memories(limit=10):
-
+def recent_memories(limit=10, *, owner_id: str | None = None):
+    owner_id = _owner(owner_id)
     rows = fetch_all(
         """
-        SELECT *
-        FROM memory
-        ORDER BY id DESC
-        LIMIT ?
+        SELECT * FROM memory
+        WHERE owner_id = ?
+        ORDER BY id DESC LIMIT ?
         """,
-        (limit,),
+        (owner_id, limit),
     )
-
     return memories_from_rows(rows)
 
 
-def memory_titles():
-
+def memory_titles(*, owner_id: str | None = None):
+    owner_id = _owner(owner_id)
     rows = fetch_all(
         """
-        SELECT title
-        FROM memory
+        SELECT title FROM memory
+        WHERE owner_id = ?
         ORDER BY id DESC
-        """
+        """,
+        (owner_id,),
     )
-
     return [row["title"] for row in rows]
 
 
-# Compatibility Aliases
 search_memory = search_memories
-get_all_memory = get_all_memories
+get_all_memory = get_all_memories

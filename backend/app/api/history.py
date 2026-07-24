@@ -22,6 +22,7 @@ from app.api.auth import (
 from app.database.attempt_audit_db import (
     attempt_audit_store,
 )
+from app.core.engine import engine
 from app.database.queue_db import (
     task_queue_store,
 )
@@ -59,27 +60,49 @@ def _clean_audit_id(
 def _task_is_accessible(
     task_id: str,
 ) -> bool:
-    queue_record = task_queue_store.get(
-        task_id
-    )
+    task_record = engine.registry.get(task_id)
 
-    # Legacy audit rows may predate durable owner storage. They remain
-    # available in the current single-owner deployment.
+    if task_record is not None:
+        try:
+            require_resource_owner(
+                task_record.owner_id,
+                resource_name="Audit record",
+            )
+        except HTTPException:
+            return False
+        return True
+
+    queue_record = task_queue_store.get(task_id)
+
+    # Direct legacy fixtures may not have a durable task or queue row.
     if queue_record is None:
         return True
 
     try:
         require_resource_owner(
-            queue_record.get(
-                "owner_id"
-            ),
+            queue_record.get("owner_id"),
             resource_name="Audit record",
         )
-
     except HTTPException:
         return False
 
     return True
+
+
+def _audit_is_accessible(record: dict[str, Any]) -> bool:
+    owner_id = record.get("owner_id")
+
+    if isinstance(owner_id, str) and owner_id.strip():
+        try:
+            require_resource_owner(
+                owner_id,
+                resource_name="Attempt-audit record",
+            )
+        except HTTPException:
+            return False
+        return True
+
+    return _task_is_accessible(str(record.get("task_id", "")))
 
 
 @router.get("/history")
@@ -87,8 +110,7 @@ def history() -> dict[str, Any]:
     """
     Preserve the original memory-history endpoint behind authentication.
 
-    Memory storage is currently single-owner and will require a schema
-    migration before true multi-user isolation is introduced.
+    Conversation history is selected from request-local owner context.
     """
 
     return {
@@ -113,7 +135,7 @@ def list_attempt_audits(
     requests filter out records belonging to another queue owner.
     """
 
-    configured_owner_id()
+    owner_id = configured_owner_id()
 
     if task_id is not None:
         queue_record = (
@@ -133,18 +155,13 @@ def list_attempt_audits(
         fetch_limit = limit
 
     else:
-        fetch_limit = min(
-            max(
-                limit * 10,
-                limit,
-            ),
-            1000,
-        )
+        fetch_limit = limit
 
     try:
         records = attempt_audit_store.list(
             task_id=task_id,
             event_type=event_type,
+            owner_id=owner_id,
             limit=fetch_limit,
         )
 
@@ -158,9 +175,7 @@ def list_attempt_audits(
         records = [
             record
             for record in records
-            if _task_is_accessible(
-                record["task_id"]
-            )
+            if _audit_is_accessible(record)
         ][:limit]
 
     return {
@@ -185,7 +200,8 @@ def get_attempt_audit(
 
     try:
         record = attempt_audit_store.get(
-            audit_id
+            audit_id,
+            owner_id=configured_owner_id(),
         )
 
     except (TypeError, ValueError) as exc:
@@ -203,9 +219,7 @@ def get_attempt_audit(
             ),
         )
 
-    if not _task_is_accessible(
-        record["task_id"]
-    ):
+    if not _audit_is_accessible(record):
         raise HTTPException(
             status_code=404,
             detail=(
