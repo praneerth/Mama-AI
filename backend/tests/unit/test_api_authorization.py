@@ -1,3 +1,5 @@
+import sys
+import types
 import unittest
 from unittest.mock import patch
 
@@ -12,6 +14,16 @@ from app.api.tasks import (
     list_queue,
 )
 from app.config import settings
+pipeline_stub = types.ModuleType("app.services.ai_pipeline")
+pipeline_stub.process_request = lambda message: {
+    "intent": "general_chat",
+    "decision": "stubbed",
+}
+sys.modules.setdefault(
+    "app.services.ai_pipeline",
+    pipeline_stub,
+)
+
 from main import app
 
 
@@ -127,51 +139,58 @@ class TestAPIAuthorization(
             404,
         )
 
-    def test_sensitive_routes_use_bearer_security(
+    def test_every_non_public_operation_uses_bearer_security(
         self,
     ) -> None:
         schema = app.openapi()
 
-        protected_operations = {
-            ("/chat", "post"),
-            ("/tasks", "get"),
-            ("/queue", "get"),
-            ("/approvals", "get"),
-            ("/history", "get"),
-            ("/audit/attempts", "get"),
-            ("/memory", "get"),
-            ("/memory", "post"),
+        public_operations = {
+            ("/", "get"),
+            ("/health", "get"),
+            ("/health/ready", "get"),
+            ("/auth/register", "post"),
+            ("/auth/login", "post"),
+            ("/auth/two-factor/login/verify", "post"),
+            ("/auth/refresh", "post"),
+            ("/auth/email-verification/confirm", "post"),
+            ("/auth/password/forgot", "post"),
+            ("/auth/password/reset", "post"),
         }
 
-        for path, method in protected_operations:
-            operation = schema["paths"][
-                path
-            ][method]
+        http_methods = {
+            "get", "post", "put", "patch", "delete",
+        }
 
-            self.assertIn(
-                {
-                    "HTTPBearer": [],
-                },
-                operation.get(
-                    "security",
-                    [],
-                ),
-            )
+        checked = set()
 
-    def test_health_remains_public(
+        for path, path_item in schema["paths"].items():
+            for method, operation in path_item.items():
+                if method not in http_methods:
+                    continue
+
+                key = (path, method)
+                checked.add(key)
+
+                if key in public_operations:
+                    self.assertFalse(operation.get("security"), key)
+                    continue
+
+                self.assertIn(
+                    {"HTTPBearer": []},
+                    operation.get("security", []),
+                    key,
+                )
+
+        self.assertTrue(public_operations.issubset(checked))
+
+    def test_probe_endpoints_remain_public(
         self,
     ) -> None:
         schema = app.openapi()
 
-        operation = schema["paths"][
-            "/health"
-        ]["get"]
-
-        self.assertFalse(
-            operation.get(
-                "security"
-            )
-        )
+        for path in ("/health", "/health/ready"):
+            operation = schema["paths"][path]["get"]
+            self.assertFalse(operation.get("security"))
 
 
 if __name__ == "__main__":

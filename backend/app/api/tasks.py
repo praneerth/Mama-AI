@@ -107,15 +107,13 @@ def _require_queue_owner(
         "owner_id"
     )
 
-    # Direct unit-test fixtures and very early legacy in-memory records
-    # may not contain owner_id. Persistent queue rows use a NOT NULL
-    # owner column, so real durable records still require exact owner
-    # matching.
+    # Authorization fails closed when an old or malformed queue record
+    # has no owner. Treating a missing owner as the current principal
+    # would allow legacy data to be claimed by whichever user requests it.
     if resource_owner is None:
-        resource_owner = (
-            resolve_requested_owner(
-                None
-            )
+        raise HTTPException(
+            status_code=404,
+            detail=f"{resource_name} was not found.",
         )
 
     require_resource_owner(

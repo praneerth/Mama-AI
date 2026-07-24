@@ -60,6 +60,8 @@ from app.core.auth_tokens import TOKEN_PREFIX
 from app.core.rbac import (
     PERMISSION_ACCOUNTS_MANAGE,
     PERMISSION_ACCOUNTS_READ,
+    PERMISSION_RUNTIME_READ,
+    PERMISSION_SECURITY_EVENTS_READ,
     has_permission,
     normalize_roles,
     permissions_for_roles,
@@ -901,6 +903,34 @@ def require_account_administrator(
     )
 
 
+def require_runtime_reader(
+    request: Request,
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_principal),
+    ],
+) -> AuthenticatedPrincipal:
+    return _require_permission(
+        principal=principal,
+        permission=PERMISSION_RUNTIME_READ,
+        request=request,
+    )
+
+
+def require_security_event_reader(
+    request: Request,
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_principal),
+    ],
+) -> AuthenticatedPrincipal:
+    return _require_permission(
+        principal=principal,
+        permission=PERMISSION_SECURITY_EVENTS_READ,
+        request=request,
+    )
+
+
 @router.post(
     "/register",
     status_code=201,
@@ -1707,6 +1737,8 @@ __all__ = [
     "require_account_reader",
     "require_principal",
     "require_resource_owner",
+    "require_runtime_reader",
+    "require_security_event_reader",
     "resolve_requested_owner",
     "router",
 ]

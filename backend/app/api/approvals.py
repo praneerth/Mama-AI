@@ -332,6 +332,11 @@ def _approve_and_execute_core(
             ),
         )
 
+    require_resource_owner(
+        task_record.owner_id,
+        resource_name="Associated task",
+    )
+
     if task_record.status not in {
         TaskStatus.PENDING,
         TaskStatus.WAITING_APPROVAL,
@@ -530,6 +535,11 @@ def _reject_approval_core(
                 f"{approval.task_id}"
             ),
         )
+
+    require_resource_owner(
+        task_record.owner_id,
+        resource_name="Associated task",
+    )
 
     if task_record.status not in {
         TaskStatus.PENDING,

@@ -171,6 +171,36 @@ class TestApprovalAPI(unittest.TestCase):
             TaskStatus.CANCELLED,
         )
 
+
+    def test_approval_cannot_control_another_owners_task(self):
+        request = TaskRequest(
+            command="delete another user's file",
+            source="api",
+            autonomy_level=2,
+            risk_level=RiskLevel.HIGH,
+            metadata={"owner_id": "other-user"},
+        )
+        engine.registry.register(request)
+        engine.registry.mark_waiting_approval(
+            request.task_id,
+            message="Waiting for approval.",
+        )
+        approval = engine.approvals.create(
+            task_id=request.task_id,
+            owner_id=self.owner_id,
+            command=request.command,
+            risk_level=RiskLevel.HIGH,
+            reasons=["Sensitive action."],
+        )
+
+        with self.assertRaises(HTTPException) as context:
+            approve_and_execute(
+                approval.approval_id,
+                ApprovalActionRequest(owner_id=self.owner_id),
+            )
+
+        self.assertEqual(context.exception.status_code, 404)
+
     def test_wrong_owner_is_forbidden(self):
         _, approval = self.create_pending_approval()
 

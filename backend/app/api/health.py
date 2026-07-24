@@ -9,9 +9,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
+from app.api.auth import require_runtime_reader
 from app.config import settings
 from app.core.approval_registry import approval_registry
 from app.core.idempotency_maintenance import (
@@ -303,6 +304,20 @@ def _readiness_payload() -> dict[str, Any]:
     }
 
 
+def _public_readiness_payload(
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Return probe-safe readiness without internal paths or identifiers."""
+
+    return {
+        "status": payload["status"],
+        "ready": payload["ready"],
+        "app": payload["app"],
+        "version": payload["version"],
+        "checks": dict(payload["checks"]),
+    }
+
+
 @router.get("/health")
 def health() -> dict[str, Any]:
     """
@@ -327,7 +342,9 @@ def readiness() -> Any:
     or the durable worker is unavailable.
     """
 
-    payload = _readiness_payload()
+    payload = _public_readiness_payload(
+        _readiness_payload()
+    )
 
     if payload["ready"]:
         return payload
@@ -338,7 +355,10 @@ def readiness() -> Any:
     )
 
 
-@router.get("/health/runtime")
+@router.get(
+    "/health/runtime",
+    dependencies=[Depends(require_runtime_reader)],
+)
 def runtime_health() -> dict[str, Any]:
     """Return runtime persistence and worker status."""
 
@@ -376,7 +396,10 @@ def runtime_health() -> dict[str, Any]:
     }
 
 
-@router.get("/health/queue")
+@router.get(
+    "/health/queue",
+    dependencies=[Depends(require_runtime_reader)],
+)
 def queue_health() -> dict[str, Any]:
     """Return durable queue health and job counts."""
 
@@ -397,7 +420,10 @@ def queue_health() -> dict[str, Any]:
     }
 
 
-@router.get("/health/idempotency")
+@router.get(
+    "/health/idempotency",
+    dependencies=[Depends(require_runtime_reader)],
+)
 def idempotency_health() -> dict[str, Any]:
     """Return persistent idempotency and cleanup-worker health."""
 
@@ -406,6 +432,7 @@ def idempotency_health() -> dict[str, Any]:
 
 __all__ = [
     "QUEUE_SCAN_LIMIT",
+    "_public_readiness_payload",
     "health",
     "idempotency_health",
     "queue_health",

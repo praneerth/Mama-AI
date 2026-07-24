@@ -74,9 +74,10 @@ def _task_is_accessible(
 
     queue_record = task_queue_store.get(task_id)
 
-    # Direct legacy fixtures may not have a durable task or queue row.
+    # Ownerless legacy audit records fail closed when no owned task or
+    # durable queue record can establish their authorization scope.
     if queue_record is None:
-        return True
+        return False
 
     try:
         require_resource_owner(

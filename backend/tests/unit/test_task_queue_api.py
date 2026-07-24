@@ -47,6 +47,7 @@ class TestTaskQueueAPI(unittest.TestCase):
         mock_list.return_value = [
             {
                 "task_id": "task-1",
+                "owner_id": "local-user",
                 "status": "queued",
             }
         ]
@@ -82,6 +83,7 @@ class TestTaskQueueAPI(unittest.TestCase):
         mock_list.return_value = [
             {
                 "task_id": "task-1",
+                "owner_id": "local-user",
                 "status": "failed",
                 "attempts": 3,
                 "max_attempts": 3,
@@ -122,6 +124,7 @@ class TestTaskQueueAPI(unittest.TestCase):
     ):
         mock_get.return_value = {
             "task_id": "task-1",
+            "owner_id": "local-user",
             "status": "queued",
         }
 
@@ -133,6 +136,24 @@ class TestTaskQueueAPI(unittest.TestCase):
             response["queue"]["status"],
             "queued",
         )
+
+
+    @patch(
+        "app.api.tasks.task_queue_store.get"
+    )
+    def test_ownerless_queue_record_fails_closed(
+        self,
+        mock_get,
+    ):
+        mock_get.return_value = {
+            "task_id": "legacy-task",
+            "status": "queued",
+        }
+
+        with self.assertRaises(HTTPException) as context:
+            get_task_queue("legacy-task")
+
+        self.assertEqual(context.exception.status_code, 404)
 
     @patch(
         "app.api.tasks.task_queue_store.get"
@@ -164,6 +185,7 @@ class TestTaskQueueAPI(unittest.TestCase):
 
         mock_get.return_value = {
             "task_id": request.task_id,
+            "owner_id": "local-user",
             "status": "failed",
             "attempts": 3,
             "max_attempts": 3,
@@ -218,6 +240,7 @@ class TestTaskQueueAPI(unittest.TestCase):
 
         mock_get.return_value = {
             "task_id": request.task_id,
+            "owner_id": "local-user",
             "status": "failed",
             "attempts": 3,
             "max_attempts": 3,
@@ -225,6 +248,7 @@ class TestTaskQueueAPI(unittest.TestCase):
 
         mock_retry.return_value = {
             "task_id": request.task_id,
+            "owner_id": "local-user",
             "status": "queued",
             "attempts": 0,
             "max_attempts": 4,
@@ -273,6 +297,7 @@ class TestTaskQueueAPI(unittest.TestCase):
 
         mock_get.return_value = {
             "task_id": request.task_id,
+            "owner_id": "local-user",
             "status": "queued",
         }
 
@@ -309,6 +334,7 @@ class TestTaskQueueAPI(unittest.TestCase):
 
         mock_get.return_value = {
             "task_id": request.task_id,
+            "owner_id": "local-user",
             "status": "failed",
         }
 
@@ -384,11 +410,13 @@ class TestTaskQueueAPI(unittest.TestCase):
 
         mock_get.return_value = {
             "task_id": request.task_id,
+            "owner_id": "local-user",
             "status": "queued",
         }
 
         mock_cancel.return_value = {
             "task_id": request.task_id,
+            "owner_id": "local-user",
             "status": "cancelled",
         }
 
@@ -433,6 +461,7 @@ class TestTaskQueueAPI(unittest.TestCase):
 
         mock_get.return_value = {
             "task_id": request.task_id,
+            "owner_id": "local-user",
             "status": "claimed",
         }
 
@@ -457,6 +486,7 @@ class TestTaskQueueAPI(unittest.TestCase):
 
         mock_get.return_value = {
             "task_id": request.task_id,
+            "owner_id": "local-user",
             "status": "claimed",
         }
 

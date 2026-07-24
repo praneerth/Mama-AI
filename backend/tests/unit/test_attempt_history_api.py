@@ -142,6 +142,7 @@ class TestAttemptHistoryAPI(
         mock_get.return_value = {
             "audit_id": "audit-1",
             "task_id": "task-1",
+            "owner_id": "local-user",
             "event_type": "completed",
         }
 
@@ -158,6 +159,31 @@ class TestAttemptHistoryAPI(
             "audit-1",
             owner_id="local-user",
         )
+
+
+    @patch(
+        "app.api.history.task_queue_store.get",
+        return_value=None,
+    )
+    @patch(
+        "app.api.history.attempt_audit_store.get"
+    )
+    def test_ownerless_orphan_audit_fails_closed(
+        self,
+        mock_get,
+        mock_queue_get,
+    ) -> None:
+        mock_get.return_value = {
+            "audit_id": "audit-orphan",
+            "task_id": "missing-task",
+            "owner_id": None,
+            "event_type": "enqueued",
+        }
+
+        with self.assertRaises(HTTPException) as context:
+            get_attempt_audit("audit-orphan")
+
+        self.assertEqual(context.exception.status_code, 404)
 
     @patch(
         "app.api.history.attempt_audit_store.get"
@@ -195,6 +221,7 @@ class TestAttemptHistoryAPI(
 
         mock_queue_get.return_value = {
             "task_id": request.task_id,
+            "owner_id": "local-user",
             "status": "claimed",
             "attempts": 1,
         }
