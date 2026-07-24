@@ -20,6 +20,9 @@ from app.core.auth_service import (
     authentication_service,
 )
 from app.core.rbac import ACCOUNT_ROLES
+from app.core.device_security_service import (
+    device_security_service,
+)
 from app.database.auth_db import USER_STATUSES
 from app.database.security_event_db import record_security_event_safely
 
@@ -227,6 +230,15 @@ def disable_account(
     except Exception as exc:
         raise _map_service_error(exc) from exc
 
+    try:
+        result["revoked_api_keys"] = (
+            device_security_service.revoke_all_api_keys(
+                user_id=user_id
+            )
+        )
+    except Exception:
+        result["revoked_api_keys"] = 0
+
     _record_administrative_action(
         principal=principal,
         action="account_disabled",
@@ -235,6 +247,9 @@ def disable_account(
             "previous_status": result["previous_status"],
             "revoked_sessions": result[
                 "revoked_sessions"
+            ],
+            "revoked_api_keys": result[
+                "revoked_api_keys"
             ],
         },
     )

@@ -57,6 +57,12 @@ from app.core.auth_email import (
     authentication_email_sender,
 )
 from app.core.auth_tokens import TOKEN_PREFIX
+from app.core.device_security import API_KEY_PREFIX
+from app.core.device_security_service import (
+    APIKeyScopeError,
+    InvalidAPIKeyError,
+    device_security_service,
+)
 from app.core.rbac import (
     PERMISSION_ACCOUNTS_MANAGE,
     PERMISSION_ACCOUNTS_READ,
@@ -94,6 +100,8 @@ class AuthenticatedPrincipal:
     token_fingerprint: str | None = None
     session_id: str | None = None
     roles: tuple[str, ...] = ("user",)
+    api_key_id: str | None = None
+    api_key_scopes: tuple[str, ...] = ()
 
     @property
     def permissions(self) -> tuple[str, ...]:
@@ -122,6 +130,10 @@ class AuthenticatedPrincipal:
             "roles": list(self.roles),
             "permissions": list(
                 self.permissions
+            ),
+            "api_key_id": self.api_key_id,
+            "api_key_scopes": list(
+                self.api_key_scopes
             ),
         }
 
@@ -533,6 +545,7 @@ def authenticate_bearer_token(
     token: str,
     *,
     record_failure: bool = True,
+    client_ip: str | None = None,
 ) -> AuthenticatedPrincipal:
     """Authenticate either a static compatibility token or account token."""
 
@@ -633,6 +646,48 @@ def authenticate_bearer_token(
             ),
         )
 
+    if (
+        bool(settings.ACCOUNT_AUTH_ENABLED)
+        and supplied_token.startswith(
+            API_KEY_PREFIX + "."
+        )
+    ):
+        try:
+            account = (
+                device_security_service.authenticate_api_key(
+                    raw_api_key=supplied_token,
+                    client_ip=client_ip,
+                )
+            )
+        except InvalidAPIKeyError as exc:
+            if record_failure:
+                _record_invalid_token(
+                    supplied_token,
+                    authentication_method="api_key",
+                )
+            raise _authentication_error(
+                "Bearer token is invalid."
+            ) from exc
+
+        user = account["user"]
+        api_key = account["api_key"]
+        return AuthenticatedPrincipal(
+            owner_id=user["user_id"],
+            authentication_method="api_key",
+            token_fingerprint=_token_fingerprint(
+                supplied_token
+            ),
+            session_id=None,
+            roles=normalize_roles(
+                user.get("roles", ()),
+                ensure_user=True,
+            ),
+            api_key_id=api_key["key_id"],
+            api_key_scopes=tuple(
+                api_key.get("scopes", ())
+            ),
+        )
+
     if record_failure:
         _record_invalid_token(
             supplied_token,
@@ -666,6 +721,126 @@ def _require_account_principal(
         )
 
     return principal
+
+def require_account_session_principal(
+    principal: AuthenticatedPrincipal,
+) -> AuthenticatedPrincipal:
+    """Require a revocable account session, excluding static and API keys."""
+
+    return _require_account_principal(principal)
+
+
+def _required_api_key_scope(
+    request: Request | None,
+) -> str | None:
+    if request is None:
+        return None
+
+    method = request.method.upper()
+    path = request.url.path
+
+    if path.startswith("/auth/") and path != "/auth/me":
+        return "account_session_required"
+
+    if method in {"GET", "HEAD", "OPTIONS"}:
+        return "api.read"
+
+    if path.startswith(
+        ("/chat", "/tasks", "/queue", "/approvals")
+    ):
+        return "automation.execute"
+
+    return "api.write"
+
+
+def _enforce_api_key_scope(
+    *,
+    principal: AuthenticatedPrincipal,
+    request: Request | None,
+) -> None:
+    if principal.authentication_method != "api_key":
+        return
+
+    required_scope = _required_api_key_scope(request)
+
+    if required_scope is None:
+        return
+
+    if required_scope == "account_session_required":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="An account access token is required.",
+        )
+
+    try:
+        device_security_service.require_scope(
+            api_key={
+                "scopes": principal.api_key_scopes,
+            },
+            scope=required_scope,
+        )
+    except APIKeyScopeError as exc:
+        record_security_event_safely(
+            event_type="authorization_denied",
+            severity="warning",
+            owner_id=principal.owner_id,
+            request_method=(
+                request.method if request is not None else None
+            ),
+            request_path=(
+                request.url.path if request is not None else None
+            ),
+            status_code=status.HTTP_403_FORBIDDEN,
+            message="API key does not authorize the requested operation.",
+            metadata={
+                "authorization_check": "api_key_scope",
+                "api_key_id": principal.api_key_id,
+                "required_scope": required_scope,
+                "granted_scopes": list(
+                    principal.api_key_scopes
+                ),
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="API key scope does not authorize this request.",
+        ) from exc
+
+
+def _request_client_ip(request: Request | None) -> str | None:
+    if request is None or request.client is None:
+        return None
+    return request.client.host
+
+
+def _request_user_agent(request: Request | None) -> str | None:
+    if request is None:
+        return None
+    return request.headers.get("user-agent")
+
+
+def _track_session_device(
+    *,
+    token_bundle: dict[str, Any],
+    request: Request | None,
+) -> None:
+    session = token_bundle.get("session")
+    user = token_bundle.get("user")
+    if not isinstance(session, dict) or not isinstance(user, dict):
+        return
+    try:
+        device_security_service.track_session_device(
+            user_id=str(user["user_id"]),
+            session_id=str(session["session_id"]),
+            device_name=session.get("device_name"),
+            client_ref=session.get("client_ref"),
+            client_ip=_request_client_ip(request),
+            user_agent=_request_user_agent(request),
+        )
+    except Exception:
+        # Device metadata must never make an otherwise valid login fail.
+        return
+
 
 def resolve_requested_owner(
     requested_owner_id: str | None,
@@ -800,6 +975,7 @@ def require_principal(
         HTTPAuthorizationCredentials | None,
         Depends(bearer_scheme),
     ] = None,
+    request: Request = None,
 ) -> AuthenticatedPrincipal:
     if not bool(settings.AUTH_ENABLED):
         return AuthenticatedPrincipal(
@@ -822,9 +998,15 @@ def require_principal(
             "Bearer authentication is required."
         )
 
-    return authenticate_bearer_token(
-        credentials.credentials
+    principal = authenticate_bearer_token(
+        credentials.credentials,
+        client_ip=_request_client_ip(request),
     )
+    _enforce_api_key_scope(
+        principal=principal,
+        request=request,
+    )
+    return principal
 
 
 def _record_authorization_denied(
@@ -981,6 +1163,7 @@ def register_account(
 @router.post("/login")
 def login_account(
     payload: LoginRequest,
+    request: Request,
 ) -> dict[str, Any]:
     if not bool(
         settings.ACCOUNT_AUTH_ENABLED
@@ -1026,6 +1209,12 @@ def login_account(
             detail=str(exc),
         ) from exc
 
+    if not token_bundle.get("requires_two_factor"):
+        _track_session_device(
+            token_bundle=token_bundle,
+            request=request,
+        )
+
     if token_bundle.get("requires_two_factor"):
         _record_two_factor_event(
             event_type="two_factor_challenge_issued",
@@ -1049,6 +1238,7 @@ def login_account(
 @router.post("/two-factor/login/verify")
 def verify_two_factor_login(
     payload: TwoFactorLoginVerifyRequest,
+    request: Request,
 ) -> dict[str, Any]:
     if not bool(settings.ACCOUNT_AUTH_ENABLED):
         raise HTTPException(
@@ -1080,6 +1270,10 @@ def verify_two_factor_login(
             detail=str(exc),
         ) from exc
 
+    _track_session_device(
+        token_bundle=token_bundle,
+        request=request,
+    )
     _record_two_factor_event(
         event_type="two_factor_authentication_succeeded",
         severity="info",
@@ -1097,6 +1291,7 @@ def verify_two_factor_login(
 @router.post("/refresh")
 def refresh_account_session(
     payload: RefreshRequest,
+    request: Request,
 ) -> dict[str, Any]:
     if not bool(
         settings.ACCOUNT_AUTH_ENABLED
@@ -1127,6 +1322,15 @@ def refresh_account_session(
             ),
             detail=str(exc),
         ) from exc
+
+    try:
+        device_security_service.touch_session_device(
+            session_id=token_bundle["session"]["session_id"],
+            client_ip=_request_client_ip(request),
+            user_agent=_request_user_agent(request),
+        )
+    except Exception:
+        pass
 
     return {
         "success": True,
@@ -1190,6 +1394,15 @@ def list_account_sessions(
         user_id=principal.owner_id,
         limit=100,
     )
+    try:
+        session_devices = (
+            device_security_service.list_session_devices(
+                user_id=principal.owner_id,
+                limit=1000,
+            )
+        )
+    except Exception:
+        session_devices = {}
 
     return {
         "success": True,
@@ -1199,6 +1412,9 @@ def list_account_sessions(
         "sessions": [
             {
                 **session,
+                "device": session_devices.get(
+                    session["session_id"]
+                ),
                 "is_current": secrets.compare_digest(
                     session["session_id"],
                     principal.session_id,
@@ -1304,6 +1520,15 @@ def change_account_password(
             status_code=400,
             detail=str(exc),
         ) from exc
+
+    try:
+        result["revoked_api_keys"] = (
+            device_security_service.revoke_all_api_keys(
+                user_id=principal.owner_id
+            )
+        )
+    except Exception:
+        result["revoked_api_keys"] = 0
 
     return {
         "success": True,
@@ -1677,6 +1902,15 @@ def reset_account_password(
             detail=str(exc),
         ) from exc
 
+    try:
+        result["revoked_api_keys"] = (
+            device_security_service.revoke_all_api_keys(
+                user_id=result["user"]["user_id"]
+            )
+        )
+    except Exception:
+        result["revoked_api_keys"] = 0
+
     return {
         "success": True,
         **result,
@@ -1735,6 +1969,7 @@ __all__ = [
     "register_account",
     "require_account_administrator",
     "require_account_reader",
+    "require_account_session_principal",
     "require_principal",
     "require_resource_owner",
     "require_runtime_reader",

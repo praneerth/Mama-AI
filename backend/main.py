@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.approvals import router as approvals_router
 from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
+from app.api.device_security import router as device_security_router
 from app.api.chat import router as chat_router
 from app.api.health import router as health_router
 from app.api.history import router as history_router
@@ -26,6 +27,9 @@ from app.database.auth_db import (
 from app.database.database import initialize_database
 from app.database.idempotency_db import (
     idempotency_store,
+)
+from app.database.device_security_db import (
+    device_security_store,
 )
 from app.database.security_event_db import (
     security_event_store,
@@ -53,6 +57,7 @@ async def lifespan(app: FastAPI):
 
     initialize_database()
     authentication_store.initialize()
+    device_security_store.initialize()
     security_event_store.initialize()
     idempotency_store.initialize()
 
@@ -124,6 +129,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(device_security_router)
 app.include_router(admin_router)
 app.include_router(chat_router)
 app.include_router(health_router)

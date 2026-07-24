@@ -294,6 +294,38 @@ AUTH_TWO_FACTOR_RECOVERY_CODE_COUNT = _environment_int(
 )
 
 # =====================================================
+# Trusted Devices and Account API Keys
+# =====================================================
+
+AUTH_TRUSTED_DEVICES_ENABLED = _environment_bool(
+    "MAMA_AUTH_TRUSTED_DEVICES_ENABLED",
+    True,
+)
+
+AUTH_API_KEYS_ENABLED = _environment_bool(
+    "MAMA_AUTH_API_KEYS_ENABLED",
+    True,
+)
+
+AUTH_API_KEY_MAX_ACTIVE = _environment_int(
+    "MAMA_AUTH_API_KEY_MAX_ACTIVE",
+    10,
+    minimum=1,
+)
+
+AUTH_API_KEY_DEFAULT_EXPIRY_DAYS = _environment_int(
+    "MAMA_AUTH_API_KEY_DEFAULT_EXPIRY_DAYS",
+    90,
+    minimum=1,
+)
+
+AUTH_API_KEY_MAX_EXPIRY_DAYS = _environment_int(
+    "MAMA_AUTH_API_KEY_MAX_EXPIRY_DAYS",
+    365,
+    minimum=1,
+)
+
+# =====================================================
 # Rate Limiting and Authentication-Abuse Protection
 # =====================================================
 
