@@ -11,6 +11,7 @@ therefore either both commit or both roll back.
 
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import sqlite3
 from collections.abc import Callable, Mapping
@@ -94,7 +95,7 @@ class SQLiteTaskQueueStore:
 
         self._audit.initialize()
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute("PRAGMA journal_mode = WAL")
 
             connection.executescript(
@@ -1224,7 +1225,7 @@ class SQLiteTaskQueueStore:
             "Task ID",
         )
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = self._select_task(
                 connection,
                 task_id,
@@ -1279,7 +1280,7 @@ class SQLiteTaskQueueStore:
 
         parameters.append(limit)
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             rows = connection.execute(
                 f"""
                 SELECT *
@@ -1303,7 +1304,7 @@ class SQLiteTaskQueueStore:
         Attempt-audit rows are append-only and intentionally preserved.
         """
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 f"DELETE FROM {QUEUE_TABLE}"
             )

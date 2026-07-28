@@ -1,3 +1,5 @@
+from contextlib import closing
+
 import sqlite3
 import tempfile
 import unittest
@@ -33,7 +35,7 @@ class TestMultiUserAttemptAudit(unittest.TestCase):
     def test_legacy_audit_owner_migrates_from_queue(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "legacy.db"
-            with sqlite3.connect(path) as connection:
+            with closing(sqlite3.connect(path)) as connection:
                 connection.executescript(
                     """
                     CREATE TABLE task_queue (
@@ -64,6 +66,7 @@ class TestMultiUserAttemptAudit(unittest.TestCase):
                     );
                     """
                 )
+                connection.commit()
 
             store = SQLiteAttemptAuditStore(path)
             migrated = store.get("audit-1")

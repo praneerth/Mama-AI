@@ -7,6 +7,7 @@ introduce a second database framework.
 
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import sqlite3
 from collections.abc import Mapping
@@ -97,7 +98,7 @@ class SQLiteStateStore:
             exist_ok=True,
         )
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute("PRAGMA journal_mode = WAL")
 
             connection.executescript(
@@ -246,7 +247,7 @@ class SQLiteStateStore:
                 + ", ".join(sorted(missing))
             )
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 f"""
                 INSERT INTO {TASK_TABLE} (
@@ -338,7 +339,7 @@ class SQLiteStateStore:
             owner_clause = " AND owner_id = ?"
             parameters.append(owner_id)
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 f"""
                 SELECT *
@@ -386,7 +387,7 @@ class SQLiteStateStore:
 
         parameters.append(limit)
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             rows = connection.execute(
                 f"""
                 SELECT *
@@ -431,7 +432,7 @@ class SQLiteStateStore:
                 + ", ".join(sorted(missing))
             )
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 f"""
                 INSERT INTO {APPROVAL_TABLE} (
@@ -498,7 +499,7 @@ class SQLiteStateStore:
             "Approval ID",
         )
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 f"""
                 SELECT *
@@ -547,7 +548,7 @@ class SQLiteStateStore:
 
         parameters.append(limit)
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             rows = connection.execute(
                 f"""
                 SELECT *
@@ -570,7 +571,7 @@ class SQLiteStateStore:
             "Task ID",
         )
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             cursor = connection.execute(
                 f"""
                 DELETE FROM {TASK_TABLE}
@@ -582,7 +583,7 @@ class SQLiteStateStore:
             return cursor.rowcount > 0
 
     def clear(self) -> None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 f"DELETE FROM {APPROVAL_TABLE}"
             )

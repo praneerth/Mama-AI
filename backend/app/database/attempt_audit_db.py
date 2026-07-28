@@ -11,6 +11,7 @@ as the queue-state change.
 
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import sqlite3
 from collections.abc import Mapping
@@ -142,7 +143,7 @@ class SQLiteAttemptAuditStore:
             )
         )
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 "PRAGMA journal_mode = WAL"
             )
@@ -455,7 +456,7 @@ class SQLiteAttemptAuditStore:
             owner_clause = " AND owner_id = ?"
             parameters.append(owner_id)
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 f"""
                 SELECT *
@@ -529,7 +530,7 @@ class SQLiteAttemptAuditStore:
 
         parameters.append(limit)
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             rows = connection.execute(
                 f"""
                 SELECT *
@@ -601,7 +602,7 @@ class SQLiteAttemptAuditStore:
                 )
             )
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 f"""
                 SELECT COUNT(*) AS total
@@ -614,7 +615,7 @@ class SQLiteAttemptAuditStore:
         return int(row["total"])
 
     def clear(self) -> None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 f"""
                 DELETE FROM {ATTEMPT_AUDIT_TABLE}

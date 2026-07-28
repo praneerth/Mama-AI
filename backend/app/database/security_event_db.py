@@ -8,6 +8,7 @@ raw client addresses are never intentionally persisted.
 
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import logging
 import re
@@ -336,7 +337,7 @@ class SQLiteSecurityEventStore:
             );
         """
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 "PRAGMA journal_mode = WAL"
             )
@@ -587,7 +588,7 @@ class SQLiteSecurityEventStore:
             128,
         )
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 f"""
                 SELECT *
@@ -671,7 +672,7 @@ class SQLiteSecurityEventStore:
         )
         parameters.append(limit)
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             rows = connection.execute(
                 f"""
                 SELECT *
@@ -757,7 +758,7 @@ class SQLiteSecurityEventStore:
             else ""
         )
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 f"""
                 SELECT COUNT(*) AS total
@@ -770,7 +771,7 @@ class SQLiteSecurityEventStore:
         return int(row["total"])
 
     def clear(self) -> None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 f"DELETE FROM {SECURITY_EVENT_TABLE}"
             )

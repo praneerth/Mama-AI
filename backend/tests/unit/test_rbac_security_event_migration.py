@@ -1,3 +1,5 @@
+from contextlib import closing
+
 import sqlite3
 import tempfile
 import unittest
@@ -13,7 +15,7 @@ class TestRBACSecurityEventMigration(unittest.TestCase):
     def test_legacy_event_constraint_is_migrated_without_data_loss(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "security.db"
-            with sqlite3.connect(path) as connection:
+            with closing(sqlite3.connect(path)) as connection:
                 connection.execute(
                     f"""
                     CREATE TABLE {SECURITY_EVENT_TABLE} (
@@ -45,6 +47,7 @@ class TestRBACSecurityEventMigration(unittest.TestCase):
                     ) VALUES ('old-event', 'invalid_token', 'warning', '{{}}', '2026-07-23T12:00:00+00:00')
                     """
                 )
+                connection.commit()
             store = SQLiteSecurityEventStore(path)
             created = store.append(
                 event_type="authorization_denied",

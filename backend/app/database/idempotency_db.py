@@ -9,6 +9,7 @@ SHA-256 fingerprints are persisted.
 
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import json
 import sqlite3
@@ -223,7 +224,7 @@ class SQLiteIdempotencyStore:
             exist_ok=True,
         )
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 "PRAGMA journal_mode = WAL"
             )
@@ -751,7 +752,7 @@ class SQLiteIdempotencyStore:
         )
         now_text = self._now().isoformat()
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             cursor = connection.execute(
                 f"""
                 DELETE FROM {IDEMPOTENCY_TABLE}
@@ -820,7 +821,7 @@ class SQLiteIdempotencyStore:
 
         parameters.append(limit)
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             rows = connection.execute(
                 f"""
                 SELECT *
@@ -874,7 +875,7 @@ class SQLiteIdempotencyStore:
                 status
             )
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 f"""
                 SELECT COUNT(*) AS total
@@ -917,7 +918,7 @@ class SQLiteIdempotencyStore:
             )
         ).isoformat()
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 f"""
                 SELECT
@@ -1026,7 +1027,7 @@ class SQLiteIdempotencyStore:
         }
 
     def clear(self) -> None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 f"DELETE FROM {IDEMPOTENCY_TABLE}"
             )

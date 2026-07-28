@@ -1,3 +1,5 @@
+from contextlib import closing
+
 import sqlite3
 import tempfile
 import unittest
@@ -39,7 +41,7 @@ class TestMultiUserMemory(unittest.TestCase):
     def test_legacy_memory_rows_are_backfilled(self):
         with tempfile.TemporaryDirectory() as directory:
             path = str(Path(directory) / "legacy.db")
-            with sqlite3.connect(path) as connection:
+            with closing(sqlite3.connect(path)) as connection:
                 connection.executescript(
                     """
                     CREATE TABLE memory (
@@ -52,6 +54,7 @@ class TestMultiUserMemory(unittest.TestCase):
                     VALUES ('legacy', 'value');
                     """
                 )
+                connection.commit()
 
             with patch.object(database, "DATABASE_PATH", path):
                 database.initialize_database()

@@ -1,3 +1,5 @@
+from contextlib import closing
+
 import sqlite3
 import tempfile
 import unittest
@@ -19,9 +21,10 @@ class TestDatabaseRecovery(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.database = self.root / "runtime.db"
         self.backups = self.root / "backups"
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection:
             connection.execute("CREATE TABLE values_table(value TEXT NOT NULL)")
             connection.execute("INSERT INTO values_table(value) VALUES ('original')")
+            connection.commit()
         self.manager = BackupManager(
             self.database,
             self.backups,
@@ -33,7 +36,7 @@ class TestDatabaseRecovery(unittest.TestCase):
         self.temp.cleanup()
 
     def _read_value(self):
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection:
             return connection.execute("SELECT value FROM values_table").fetchone()[0]
 
     def test_backup_is_created_with_checksum_and_sidecar(self):
@@ -60,8 +63,9 @@ class TestDatabaseRecovery(unittest.TestCase):
 
     def test_restore_requires_confirmation_and_restores_data(self):
         backup = self.manager.create_backup(reason="restore_source", apply_retention=False)
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection:
             connection.execute("UPDATE values_table SET value = 'changed'")
+            connection.commit()
         with self.assertRaises(RestoreConfirmationError):
             self.manager.restore_backup(backup["filename"], confirmation="wrong")
         result = self.manager.restore_backup(
