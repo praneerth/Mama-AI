@@ -153,7 +153,7 @@ python scripts/backend_smoke_test.py --base-url http://127.0.0.1:8000
 
 - Python compilation
 - unit and integration tests
-- Bandit scanning of security-sensitive backend modules
+- Bandit scanning with an exact reviewed B608 fingerprint baseline
 - dependency vulnerability scanning with `pip-audit`
 - Docker Compose validation
 - Docker image build validation
@@ -175,3 +175,10 @@ Before release, verify:
 8. `/health/ready` is healthy after deployment.
 9. Logs and metrics are collected by the operations platform.
 10. The native desktop agent is deployed separately for host automation.
+
+## 10. Final release gate
+
+Before creating a production release tag, complete the evidence-based process in
+`docs/release_testing.md`. A successful Docker build or unit-test run alone is
+not a release approval. The final gate also requires security scans, a verified
+backup, live smoke checks, bounded load validation, and a clean Git tree.

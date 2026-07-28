@@ -1,0 +1,928 @@
+{
+  "findings": [
+    {
+      "count": 1,
+      "filename": "app/database/attempt_audit_db.py",
+      "fingerprint": "305a195e721e826196293334b0a9e1d847653a56f074133c101e86aef8834453"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/attempt_audit_db.py",
+      "fingerprint": "41487a78e8124add199d508cc63f7b123639b13b4587440022a9929e0dc89b4c"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/attempt_audit_db.py",
+      "fingerprint": "7355a7e4474951139cfa2a3aea52608ad164ebfb619102e1c8971bba01f18535"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/attempt_audit_db.py",
+      "fingerprint": "9da5f844529a29a8b1db1d355f9566425551b30887b4d4b5823619e6eb7782f2"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/attempt_audit_db.py",
+      "fingerprint": "9de520d897cfd01bb86f88abd81504e039d971077bb0f71dabf870fecb3310ca"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/attempt_audit_db.py",
+      "fingerprint": "a7b2c3164322b57129e677f3e9f6d34771a1d143edf93a7431127e983a0a9b7b"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/attempt_audit_db.py",
+      "fingerprint": "d345fc20f9cb77eac5a8ccc3505eaf1f37f5d15258c1ee4a083491a292c1d1ed"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/attempt_audit_db.py",
+      "fingerprint": "fcf9fa792e72986cccfa0488444ed726ce1dea6384188e09f6d626e1ff9fc1b2"
+    },
+    {
+      "count": 2,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "0030fd15acf6b9f8d6e4b4862bb38e2566b45eb821be280925bd447914cd88b5"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "07dea1a49bdc60a6fe7403b7a8bc791e54a3d3e48ec9f094e8b3b02b3a257a50"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "085249c77ce03fdd6388445f718cccaf1bfb465f3b56fcfead77b7fb0fc93c66"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "0efaf336452bc46c7c24a0d51e4e43343daad9301590d56f8a3b8ebbb1d17fc8"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "1000b19536c25c4c74d3893795911355190fb855d6f3730801baebfba59d7a11"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "122d527653aad9651bb86cf06d3a63a968fc53a411b35d28357fb75df37a21c0"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "1444ae9d926e52daf2315675b7d725ddd1823ce74b36c5fc90cfcdd80ec00c23"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "152ac032a414321d17e6c2979524b1aac3e3d093a0618d0a6e4d616627c090d8"
+    },
+    {
+      "count": 2,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "15981cd286d25d070312afa37f94dd4e6bf44276b8a1e73072fb398c7c49bb69"
+    },
+    {
+      "count": 2,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "166929235f11992aaf9242fe31ce901a388614e529ce5a81cc4d02d1e06ee045"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "1811dcde87a0687b8d45037120ed88732f16fe01c52b0ed271da0cde1bb53c38"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "18cf8b1fa26c1509ffd4e6c040dfb7ad1925c5f20c0ab2adfa4ba7c19d65af93"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "1bfdc9af29115f667aecfb8946ff9beee52842151068b4ea81840551eeafeb92"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "1f9499bd09df3b16947827f1f9c25d2cf2ed1443269fc2f619b0d598d5841700"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "2188a0a6c4ee1b11a483c01dbc50cbf531e351223e6438274ef3b082cb25bad0"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "255e06310eb32f69c0a6b1e5978ababf351e80d6dfe5e8264df916ce78b00c7e"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "28ac5b97bc86d3660d7e42790a8f3806e8b19932bb561a5967f6197138e7783a"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "34ab41716b6a939be0b40a960eb3c69ae2e2fce88b38264347a0f88e2fbf85b0"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "37826e2c8082b130bccf82b3e7fb08f211234b75aacd13d1e4550fc84430f1ab"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "3928aed7cbbb7d51f37313e7613debaaf023c2826b17b0d481978d107aaec9d9"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "3bf2c644160ce5408d6ef03018628841f4cd13e5cce9a32fd3d14193cb4b9d0e"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "3c6a639f24eaa009134d1f52ceca410e7afdd0b0c0c8d752689691753048d0eb"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "4244ce03a5e09b8d8bff52dbb7cf7655a692ff19b7cb5367b07499141f958293"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "429e9e3ff38df851e83994cb35d42ba7821ffa8927c9bbac23fa322a5ac06fb0"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "42c1d76eabb4712170873a3a6d91389b4719438eaed4d997279385296fe0b6ce"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "447242db7c01f6becdd868ce76be051bbd8666dd37572fb443e5b76e8dc7f486"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "4da3b00f358d0fd80f1f04874143ffe89f509f1044416c41d46de55870bd6bbd"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "4e42c4416c9b66ae8c9889ea2d08de14f8fe2475d6eb278dc39c758d288c4d9a"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "52d5b75affcb91466f2c85779bdfe74070bbec03bc46c283b6ff077d21823129"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "5c017cf888f2b07ecce1736e5bcc11e6e210f53c41bf3d956e73a75374998c98"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "63f6f5b5eea1f0f4e13fbf6a3c6030c34f052841c6c0533cce20fd4270b2d354"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "66569cfbceab5c483ed7ca39fa368cde86b1b5a41df9ecdc6acc0f6a2efae982"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "67c0d97a4847debdc071251578eda320612a55d576364ec74e939c445730af1f"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "699bba2381b7faefb45d170b7f266b686cd6ddb9b5b28a1c781596a010fd5892"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "6b870e9320012b8d5b1cc485b0784f846b865875761d19097747ee68d64b794f"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "6f30f1a92e0de708e46e3ec5b6c215687144bf63704c84655d58e6ef3460698f"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "72429019881d1fb2e58db6c922dc7b2275414233df4527d11c695e781a4dabcb"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "7449e4ac17dab39b59ddfcd281445fa9beace7ced5ed704e44f673a2278529d8"
+    },
+    {
+      "count": 2,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "7636f5d69859e9c54450eed7e4f4fc5ef6548cb2b53388258bbb18ec55b8aca6"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "7afba8b30ded2d40eab1dffa2e7065769daa15f457e3dc14389ef2793211679c"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "7d77f22dc583ce3d887124e9ae0a27f9e1550d8ab2f3169fe0a790256687845d"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "8309a9edd09c72aaaf1e40496ab2950ce4740a55611ea5128800b125ad538439"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "845aa4f8f89ec2833f554540a7dd927c7912cc5bf266c05a3e33b795c8a51e54"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "857192c8525fc9483bd148c766274f26e635c3a68aa8e7beb7996e03060e7567"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "85c5230bb78bb584dfd6d4c7f678759ee5e7bb5965858283bd5851fe8ab5436d"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "86e1551ee20907a614147ea389532af346bf4179a1400c27930ba162fdb5ec50"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "88476c05836f99dc451a2e3e10b71a6dadd1ea808f8187022c83d68a4ec094fd"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "88621731eabb6e964e98c6c1e58c293daef3c64f6be02ee04e9c1147ac998544"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "887efa782db2ba52404f1fcc05d4b3d2e9f15314bcf9a5cfddac39bb513952ae"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "89ffd2194f9639ff49d304ccca3b6cafcef5af82ac3e9cd3bbc0546d917d135a"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "8f1eacc8ef67978e7aefff4e210edbc10873c135da40ecb957c98bb22a7ab8f4"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "9002de5273805ed86b559e8997b86f21b5a68ee5c434d1a59eddda0a34d8c305"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "92c143ffc4e19ae29d2b7acc71704820823a376da559690a6428245e8ef61b90"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "954c687067c1d0e25aa0267f87976fffed55a24b5480418e8f407b35f6cd7de8"
+    },
+    {
+      "count": 2,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "95802a19eda4fcec303c34b4a2be03f345856e4a412246c12e3ecdfcf96eccd7"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "96a84b5bb6f7bdf384cae9f6c889468fa2c35619f5b23366ce3ee04e15713760"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "98a9ae2469c3498757e475dd45853677d48d0dd6e6d7fe54f0848432da23cff2"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "99884068755c2bd49f4ccd1a500be829aca9e7594605a8d1f9ebd677783dda57"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "9caa173c587e45554f805a65c88dfb0f1625e3417bca32ea025d113968130527"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "a0493d39574177cd7d328ab3738e4113209aaa788fb9ea13b46ba7d099dc8fce"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "a0f5a54bf12f57088d00a782967447a32b87cc7130343072c55184dde19a6a8e"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "a5516ed0272fe86ea0d1590ccdf3b310065f1db511c4e01344ed2733521b510f"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "a5adab2b83493edc33ac4c44c3359297e195e066d3593ce628e2f35733e460df"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "a727037817b86d0704bf31d742327c70ca491c6c3fca054eb125b803c372ebba"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "a925ac7f83e79eefe1b7539690c797f81168a2cf82a0d5ff0e978465bebecd27"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "a95218bab2ce844bdaf4483950b3bdf11d9922e8eaeacee72857453c9905349e"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "ad691153a63d6715ba42401fd523c2823284232e295f2c8ee44a569a6e7108b5"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "ae6ce27d889dbd7340f01d6f7eab7078952ef81238057c68001f0e99bce89b8f"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "b2e93a05dcbafcdef54109360b2133a8855e6e28c36e5008fd8c0cf78228c2cd"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "b4e44c2e62321da7bbc1528a61610297aa0a79ba6854a03415c4f9abfde96b99"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "b6ac4935804fec3c962a9082861e559ff501d505bbe0e4fbe705ee0253d0b1db"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "b73d78030fbad0ae6fa619a9e30fb1444b210aa2566e623e1276b63eaa607ee5"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "ba69acf5399d367ecb8b88ba8508192f8c11ce685fd3e5ea02283778948e57d7"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "c110c37b367ccce4755eb6d3778f22768245732151a1cd5fb9a81ae8964aa4c0"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "c13db6cc68c6bab5b344680b672e929cdbe772e71b94938f411cdf56fa8016ef"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "c36dc310d378c53f21656dd2b8391266505450d190ff953575cb9e5cfbdc3654"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "c41bd7ccd7f8b2477c0809876707631207435072e60e4ef7fd2b24f6e94dbe24"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "ca6f4b4c61ee70b93331958d871f13b5817548e217d44f9a29d3a931be03d660"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "caedc028d8c41101414fe2977ddfd93cdbe6726e63bb889773fb9c531e4a0ab3"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "d2ba5e74b4aa59e594756953106b303077f14b74f26d53bc7a117f6ea19ccde2"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "d327b903ced1942a1142e5d7fa76d157bb7e92e94198676ca0674105d0f1dfdb"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "d38381d420269e4fdc44eed6c0a6d3b78f2fb8b3d3699a48ec7d00f9310d52ec"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "d992d47eedc26627ec476f565a66791e123be073686ab06d252dbacc970c94ad"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "dbc2c6fe39dd4d265425b4222771272b4c09ca7fc60fa15160b0c6e2deaf76fb"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "e119280c30dcaafaea5fb2a43f34d50fce876bba3b8ae44e9dba668f3864ca45"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "e5b6f8f8cbcf536c0645c03ff74b82e305bca9fd8b62e952dd93ba996876c6a7"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "e8c5ef1bf82b53eb50887f905cb264a1c79122360cae69970405dbafe531c230"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "ea8d0717e9ac2f8cde61a0f0c93809b1c3e221f593390520e956692d04b21b22"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "ed2427bd294cab686cfde0e084c297daa135d497013eb254e7ab882def1ad946"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "f8d5c7e5de88c4c1e728057b800f567dc493169f5e983019565187b92d2a42d6"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "fc40f0cc950ac225ac0de4bfd16efc67048df9689f897f30614cc12868d1856a"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/auth_db.py",
+      "fingerprint": "fccefce14e405e6767006e4b57fef8bb157aa640ff04df66512754b3a5039871"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "076c34421ef9f5ec0ad05ca4d633424d1e59f42838f86aa0a0bfdbe980e98df7"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "0f108be050320d0cc16eda3fa36a850ccd04c702b5016d1febf951e126a09795"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "1c96001a46319723c3ac7326599e048f948ad6d8b97684cec389c064d8f792cd"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "1cc711df874bd96c83465da1f81177bb3455d16d92f36e3158a3001756faa508"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "1cf7ef1a8002e049570937fcbea86d87d378c33b9725e8fca738107b3b10e820"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "318982c9a1962940793995aaddb0d9631a634696bd9f6d13df144c1223ee054e"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "33a010db0a2bb8e8adfc9b417c66dc8a99320741b24abef059dc16c639bc2f13"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "3852d6f216db978c68776c6e1c19a20dc21256821659170d6246acd1df951cf2"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "3a9ba630a6825de4c828aa29112fb0d4b881c5bf1c3a7e41357ce8bb1b259312"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "44dee786819394cc3f2fac65834337ef762dd16286fcb1187a297836004616e4"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "4889254ff378403e0127a487d1112077998d70b463f2dd6637929c597eeb472e"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "4a8622c7e2e77e40d81ad44f9c9a1942d56c79ff5a87f66516ddbdd056d84f81"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "5628f7eb2bcfcc448e8157164dc018cc67e46c12b9337368cb1088ce9d72a470"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "58c8dec6c8084d9d2448c8baf49b4026a49b3f219f42ff9e869b0dfabc2704fc"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "5e62414b94049dc134aa5fc88623106adbc2d8074ea9f31b3fd8d8ed8379ae69"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "5e86b6ae900667db9cfc8c936eb6b1ab8040fde469b42cbe8815c7a64de4e9a9"
+    },
+    {
+      "count": 2,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "6d719e6580fbea6aeb3ab6120f422a58611382539a57fada8cecefa8bce8b37b"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "6faf60fd71ce25b38a0c777a24616ae6430ac39a2840ff76f035005a9d834df8"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "75a70d50b92095cdf4b6f3c0792060e7588e75fcf1501dc31497416d63e325b2"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "79bb242cce267e4a2aa88fe62c0e834e776645bfc14dbe8edc267494e29eda9e"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "7ac2c067c329f03ded003b9e3608cc70053556b45e8195ea32d02d63bba74196"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "8ca47cce5eef79d55ce91058d77a3996b91da650852f069700840f724369aa1b"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "8f2c7909068ee1120938f73159d31b75a89b3f9242d930ae9a04620d6691b7bc"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "98e5a5e3c1d750d21e497c152959cbfd7462c5527e0cf7dc8e5eb235f9fa990b"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "9cffda8d7bab0d3a5ea012d01a9daae7be925cb8220444b9cbf4e67d8efae7cf"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "a0d05591a400c513d1507bb6f4a70c024c28990bf24856ceb1eb8fe759f001a8"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "a26f2272cf79fcb48ede9b1edac0f5bdd3e755d4619d735c3e5bf364889d4a7f"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "a74aa92c410ba70d3bdb4dc3142861aeb0f318195b8123865faf8405e27a72cf"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "a7bc782148a0bde99d01892c6f608c85f31049adff7f41e1032ca1979296151e"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "a9a2338e78422f4c7a0f46e5514820fd16c4b5016da81bc7df4fba8f29f63d48"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "b52a0440f113869fb9cf4a30abf02ef80b102bc4f9b03c9cd69e0331806c31c7"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "bdeff646b008d6da814ee88fd07e47b3197335eec61fff6dd77f4e9aaa7199cb"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "d537cfce3c821c79cfc9386f26677a717846f1b91f903eb43c7b7f32155dbc61"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "ef2e0ff1f63bf92f7246f0ddda0bdfd69c4f7c3ad9612bb99736aded9db3af3d"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "f28489e697bd4e14d6f7194833592cc0c5c393a763f2c12eea1ca8941ebadd57"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/device_security_db.py",
+      "fingerprint": "f2ea2e3106e0b8896278620e28d8220e3f54a4b6ed22b71c3ea8212a64eecf5a"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/idempotency_db.py",
+      "fingerprint": "203b7ee3b2214557a9c2043902d1853d9e75bd68b6f79c343bde5e760ba4c0b6"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/idempotency_db.py",
+      "fingerprint": "27a704d0de634a0e1da26b61d58f0d3b12b51310c1342d6dcbd5b7a08e6ecae3"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/idempotency_db.py",
+      "fingerprint": "2df399a60ecf5e4f6c33dbeafffcdd4441aad5405a5f9def0cccd52432339295"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/idempotency_db.py",
+      "fingerprint": "4060730db72e6487f4430143cb76ee605fe6f7fc31ac3fbf617792d2e07ab96c"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/idempotency_db.py",
+      "fingerprint": "6103192094f449c8d493beddfd26a537b6836570eeb4b1891c0af1cd877203de"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/idempotency_db.py",
+      "fingerprint": "632bcfacec86f73d9b88d62ecfd426a35625f3dd3a18eef6074ff8ca6e9fafc9"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/idempotency_db.py",
+      "fingerprint": "6752b9035cc064cce2f93a51cc6424110b4f0f00f6041b39d9a45e70f798fec9"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/idempotency_db.py",
+      "fingerprint": "77029a249a83a02b13474b4ea389880b8ed910fc711a67e6156a125871b87fa8"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/idempotency_db.py",
+      "fingerprint": "b57582415fc669af4e17881afc1dbbbc441b4f8298253426ed69f5c5c5c507ed"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/idempotency_db.py",
+      "fingerprint": "eea83a0e97176237210931fe920040f7cd71d15d19c104e6e0807287206d9377"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/idempotency_db.py",
+      "fingerprint": "f62d96dd0c08792163741987480099360b35156e85761e1a2ea7923f00c97687"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/migrations.py",
+      "fingerprint": "6ac86c71d9a4815c6865a7e710dcf593f5e294b0f89bffba69bae50015cb9dd2"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/migrations.py",
+      "fingerprint": "85e4f79ef9e09470dd7c9c18c73fb4c1dc33652b9e323ac1e18fa91b1e2a69dd"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/migrations.py",
+      "fingerprint": "b8a57fdf482aec2b0e1e2e88a667d47751eaf70b27a12e96f6b564241727016e"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/queue_db.py",
+      "fingerprint": "21882f03a90cf74a3dd319aa3204cad43d35338be787f8064064b59fcd62bf5f"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/queue_db.py",
+      "fingerprint": "256dfc7d263b7cc7b1758e1bb099205aa7dbf081d3fefc7abfaa3bd3c8bdc878"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/queue_db.py",
+      "fingerprint": "29f0fad3abee0a90e80736b4780ea039b087ff02d8380a7549392c3bb647833b"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/queue_db.py",
+      "fingerprint": "2b38ba9798681f11a2e76a520f9a580ec277a2c494aabe870d31e700c13380f0"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/queue_db.py",
+      "fingerprint": "2d11bb6ed5f8ffd7f3bb2d7bc1df9b616c2fe41e4c2a16c91476fe58f1d82616"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/queue_db.py",
+      "fingerprint": "3ce40edc3cf40076f75169c1df8fe1d78465abbe62786dc477bce48e6d235fe0"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/queue_db.py",
+      "fingerprint": "9575a01c4dac793324a9704ca1e319323f53d6f4f307f5ae5ef957a772825b82"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/queue_db.py",
+      "fingerprint": "b408f62440017636e656d761af36a8e64a295b32e4828cafc07e51d86a4f91b3"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/queue_db.py",
+      "fingerprint": "bf5f89d3470a7cfffd6e704d56fa068128fb26fa863a7608a6081288550ab152"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/queue_db.py",
+      "fingerprint": "c13099af85032d69aab8227b612ecd9583bce42a0d4e3c918ccaa34af4ae82c3"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/queue_db.py",
+      "fingerprint": "c82456274bddfbe442b5e9e880183e623486e5d333edbc438ddeddaed3979f6f"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/queue_db.py",
+      "fingerprint": "da064cf2e04b0de44b2d9d95bda1755361bd27fa9d7e237746392200ddaa3b8d"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/queue_db.py",
+      "fingerprint": "db29dc085879b94082c323fa03a5eb338d70f046ffc2be93290b94735bcb2f67"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/queue_db.py",
+      "fingerprint": "dfa765572febb1cade671e6eb44942b74b5f1ec815b1e5bb4e418d7667a19d67"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/queue_db.py",
+      "fingerprint": "f8e8ce474c8ec23a1d43163c133595a8fc9da4ed33669007b34c32121e4af80b"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/recovery.py",
+      "fingerprint": "e6966aaa3762fed6f6153279e52ef5f12db80a25376367c2fb08978116b16b63"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/recovery.py",
+      "fingerprint": "f297068d99443d40e6dd1cc41a1ddc4417b23dc326e54010890326bac685e052"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/security_event_db.py",
+      "fingerprint": "29473fbbd51804de4a709704819588affa4a2cadfee9fbfeca55d08831c2a5d4"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/security_event_db.py",
+      "fingerprint": "31921ce46edfd4cf95d08a6c4bd23ed3c0a31a809413a80a6219a0a6f159ded4"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/security_event_db.py",
+      "fingerprint": "5d3bbf95d4468db01773b0df02d795f47adc5967d6855f993a2c3523252d7c4e"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/security_event_db.py",
+      "fingerprint": "663283336705354541fd95aabed5f0d181e0e7bf8794a764631c18d557996103"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/security_event_db.py",
+      "fingerprint": "a98339610dcaa7e7d9cc425871130b9aed1fe842c64191a9a5cbfdfdd99c2407"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/security_event_db.py",
+      "fingerprint": "ee53118cb4ef62298055ccc41ba791c7d935c5a291c0f9ada7cecf0ac6f00f66"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/state_db.py",
+      "fingerprint": "03a4d554ef705ef00c870dca439d82ca8255d54839971f1867905b6a1350bdcd"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/state_db.py",
+      "fingerprint": "0947c519a7c468d1b15a569ecb53b64e2d0edc095cf8587f1877ddb3ac81acfa"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/state_db.py",
+      "fingerprint": "0ced8ea954a0f4f98ba73021594403c1abdd5b074eff631fd756c16dd4bd3214"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/state_db.py",
+      "fingerprint": "25d0cf0b67d428aca792ed37c918c825a1ea8c18aef50c5f6a5e1c89856cd29a"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/state_db.py",
+      "fingerprint": "2a648dd117f249fd43bf14614b909b24c19ecfed99103587fb405184f5ddc19f"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/state_db.py",
+      "fingerprint": "5186a9b9cb7546b4303720f61b7170036e85cc8d3fced08e78a74c11b23dfa22"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/state_db.py",
+      "fingerprint": "58926b285b51ceeff7459794ab0826afe87e05d2660c2853b803942ab3a08b95"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/state_db.py",
+      "fingerprint": "8d635c59351e89d8d7b88e8e8813b8026931871baa812a426fd75b3337ead363"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/state_db.py",
+      "fingerprint": "bb027ac922678a7212f468a1b53fa9b4129178d13a319696d8e9d8f0f33c4f03"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/state_db.py",
+      "fingerprint": "c1eade6794ba7b1166892286259701ddcf4f23b003b1db728a11ebf42c4316cf"
+    },
+    {
+      "count": 1,
+      "filename": "app/database/state_db.py",
+      "fingerprint": "dffe13be5e353d020708398537c7b3e4b1970d42db6621b119bf4f4fbe0a7ef9"
+    }
+  ],
+  "rationale": "Reviewed SQLite query construction. Interpolated identifiers are immutable module constants, and optional SQL fragments are assembled only from fixed clauses while all external values use SQLite parameter placeholders.",
+  "reviewed_finding_count": 190,
+  "reviewed_test_id": "B608",
+  "schema_version": 1
+}

@@ -42,3 +42,8 @@ backend/app/database/mama_ai.db
 backend/app/database/mama_ai.db-wal
 backend/app/database/mama_ai.db-shm
 backend/app/database/mama_ai.db-journal
+# Local release evidence and reports
+backend/release/*.local.json
+backend/release/report*.json
+!backend/release/evidence.example.json
+backend/bandit_report.json
