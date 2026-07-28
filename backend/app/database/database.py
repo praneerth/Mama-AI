@@ -1,16 +1,17 @@
 import sqlite3
 import os
 
+from app.config import settings
+
 # =====================================================
 # Database Configuration
 # =====================================================
 
 DATABASE_NAME = "mama_ai.db"
 
-DATABASE_PATH = os.path.join(
-    os.path.dirname(__file__),
-    DATABASE_NAME
-)
+# The path is configurable for containers and managed volumes. Existing tests
+# and stores may still replace this module-level value at runtime.
+DATABASE_PATH = str(settings.DATABASE_PATH)
 
 
 # =====================================================

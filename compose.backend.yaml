@@ -1,0 +1,71 @@
+name: mama-ai
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: mama-ai-backend:${MAMA_IMAGE_TAG:-latest}
+    env_file:
+      - ./backend/.env
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "False"
+      HOST: 0.0.0.0
+      PORT: "8000"
+      MAMA_CONTAINER_MODE: "True"
+      MAMA_DEPLOYMENT_VALIDATE_ENV: "True"
+      MAMA_DEPLOYMENT_REQUIRE_HTTPS: "True"
+      MAMA_DEPLOYMENT_ENABLE_DOCS: "False"
+      MAMA_DEPLOYMENT_WORKERS: "1"
+      MAMA_STATIC_TOKEN_COMPATIBILITY_ENABLED: "False"
+      MAMA_AUTH_DEVELOPMENT_TOKEN_EXPOSURE_ENABLED: "False"
+      MAMA_DATA_DIR: /var/lib/mama-ai/data
+      MAMA_DATABASE_DIR: /var/lib/mama-ai/database
+      MAMA_DATABASE_BACKUP_DIR: /var/lib/mama-ai/backups
+      MAMA_LOG_DIR: /var/log/mama-ai
+      MAMA_CACHE_DIR: /var/cache/mama-ai
+      MAMA_TEMP_DIR: /tmp/mama-ai
+      MAMA_SCREENSHOT_DIR: /var/lib/mama-ai/screenshots
+      MAMA_MODEL_DIR: /var/lib/mama-ai/models
+    ports:
+      - "127.0.0.1:${MAMA_BACKEND_PORT:-8000}:8000"
+    volumes:
+      - mama_ai_data:/var/lib/mama-ai/data
+      - mama_ai_database:/var/lib/mama-ai/database
+      - mama_ai_backups:/var/lib/mama-ai/backups
+      - mama_ai_logs:/var/log/mama-ai
+      - mama_ai_cache:/var/cache/mama-ai
+      - mama_ai_screenshots:/var/lib/mama-ai/screenshots
+      - mama_ai_models:/var/lib/mama-ai/models
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+      - /tmp/mama-ai:size=256m,uid=10001,gid=10001,mode=0700
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.deployment.healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+volumes:
+  mama_ai_data:
+  mama_ai_database:
+  mama_ai_backups:
+  mama_ai_logs:
+  mama_ai_cache:
+  mama_ai_screenshots:
+  mama_ai_models:

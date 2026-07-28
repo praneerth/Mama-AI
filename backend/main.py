@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.approvals import router as approvals_router
 from app.api.admin import router as admin_router
@@ -38,6 +39,7 @@ from app.database.device_security_db import (
 from app.database.security_event_db import (
     security_event_store,
 )
+from app.deployment.validation import validate_runtime_environment
 from app.exceptions import register_exception_handlers
 from app.middleware.principal_context import (
     PrincipalContextMiddleware,
@@ -58,6 +60,18 @@ async def lifespan(app: FastAPI):
     logger.info(
         "========== Mama AI Backend Starting =========="
     )
+
+    if settings.DEPLOYMENT_VALIDATE_ENV:
+        validation_summary = validate_runtime_environment().as_dict()
+        app.state.deployment_validation = validation_summary
+        logger.info(
+            "Production deployment configuration validated",
+            extra={
+                "event": "deployment_configuration_validated",
+                "environment": validation_summary["environment"],
+                "workers": validation_summary["workers"],
+            },
+        )
 
     migration_summary = migration_manager.migrate()
     initialize_database()
@@ -108,6 +122,9 @@ app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     lifespan=lifespan,
+    docs_url=("/docs" if settings.DEPLOYMENT_ENABLE_DOCS else None),
+    redoc_url=("/redoc" if settings.DEPLOYMENT_ENABLE_DOCS else None),
+    openapi_url=("/openapi.json" if settings.DEPLOYMENT_ENABLE_DOCS else None),
 )
 
 register_exception_handlers(app)
@@ -127,11 +144,14 @@ app.add_middleware(
 )
 
 app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=list(settings.TRUSTED_HOSTS),
+)
+
+app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-    ],
-    allow_credentials=True,
+    allow_origins=list(settings.CORS_ORIGINS),
+    allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

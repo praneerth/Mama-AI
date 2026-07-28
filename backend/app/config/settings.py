@@ -112,6 +112,30 @@ def _environment_float(
     return value
 
 
+def _environment_csv(
+    name: str,
+    default: str,
+) -> tuple[str, ...]:
+    raw_value = os.getenv(name, default)
+    values = tuple(
+        item.strip()
+        for item in raw_value.split(",")
+        if item.strip()
+    )
+    return values
+
+
+def _environment_path(
+    name: str,
+    default: Path,
+) -> Path:
+    raw_value = os.getenv(name)
+    candidate = Path(raw_value).expanduser() if raw_value else default
+    if not candidate.is_absolute():
+        candidate = BASE_DIR / candidate
+    return candidate.resolve()
+
+
 # =====================================================
 # Application
 # =====================================================
@@ -126,14 +150,91 @@ APP_VERSION = os.getenv(
     "1.0.0",
 ).strip() or "1.0.0"
 
-ENVIRONMENT = os.getenv(
-    "ENVIRONMENT",
-    "development",
-).strip() or "development"
+ENVIRONMENT = (
+    os.getenv(
+        "ENVIRONMENT",
+        "development",
+    ).strip().lower()
+    or "development"
+)
 
 DEBUG = _environment_bool(
     "DEBUG",
     True,
+)
+
+HOST = os.getenv(
+    "HOST",
+    "127.0.0.1",
+).strip() or "127.0.0.1"
+
+PORT = _environment_int(
+    "PORT",
+    8000,
+    minimum=1,
+)
+
+DEPLOYMENT_VALIDATE_ENV = _environment_bool(
+    "MAMA_DEPLOYMENT_VALIDATE_ENV",
+    False,
+)
+
+DEPLOYMENT_WORKERS = _environment_int(
+    "MAMA_DEPLOYMENT_WORKERS",
+    1,
+    minimum=1,
+)
+
+DEPLOYMENT_ENABLE_DOCS = _environment_bool(
+    "MAMA_DEPLOYMENT_ENABLE_DOCS",
+    ENVIRONMENT != "production",
+)
+
+DEPLOYMENT_REQUIRE_HTTPS = _environment_bool(
+    "MAMA_DEPLOYMENT_REQUIRE_HTTPS",
+    ENVIRONMENT == "production",
+)
+
+DEPLOYMENT_REQUIRE_AI_KEY = _environment_bool(
+    "MAMA_DEPLOYMENT_REQUIRE_AI_KEY",
+    True,
+)
+
+CONTAINER_MODE = _environment_bool(
+    "MAMA_CONTAINER_MODE",
+    False,
+)
+
+CORS_ORIGINS = _environment_csv(
+    "MAMA_CORS_ORIGINS",
+    "http://localhost:5173",
+)
+
+CORS_ALLOW_CREDENTIALS = _environment_bool(
+    "MAMA_CORS_ALLOW_CREDENTIALS",
+    True,
+)
+
+TRUSTED_HOSTS = _environment_csv(
+    "MAMA_TRUSTED_HOSTS",
+    "localhost,127.0.0.1,testserver",
+)
+
+FORWARDED_ALLOW_IPS = os.getenv(
+    "MAMA_FORWARDED_ALLOW_IPS",
+    "127.0.0.1",
+).strip() or "127.0.0.1"
+
+SERVER_TIMEOUT_KEEP_ALIVE = _environment_int(
+    "MAMA_SERVER_TIMEOUT_KEEP_ALIVE",
+    5,
+    minimum=1,
+)
+
+SERVER_GRACEFUL_SHUTDOWN_SECONDS = _environment_int(
+    "MAMA_SERVER_GRACEFUL_SHUTDOWN_SECONDS",
+    30,
+    minimum=1,
 )
 
 
@@ -508,13 +609,34 @@ OBSERVABILITY_ALERT_STALE_CLAIMS = _environment_int(
 # Directories
 # =====================================================
 
-DATA_DIR = BASE_DIR / "data"
-DATABASE_DIR = BASE_DIR / "app" / "database"
-LOG_DIR = BASE_DIR / "logs"
-SCREENSHOT_DIR = BASE_DIR / "screenshots"
-CACHE_DIR = BASE_DIR / "cache"
-MODEL_DIR = BASE_DIR / "models"
-TEMP_DIR = BASE_DIR / "temp"
+DATA_DIR = _environment_path(
+    "MAMA_DATA_DIR",
+    BASE_DIR / "data",
+)
+DATABASE_DIR = _environment_path(
+    "MAMA_DATABASE_DIR",
+    BASE_DIR / "app" / "database",
+)
+LOG_DIR = _environment_path(
+    "MAMA_LOG_DIR",
+    BASE_DIR / "logs",
+)
+SCREENSHOT_DIR = _environment_path(
+    "MAMA_SCREENSHOT_DIR",
+    BASE_DIR / "screenshots",
+)
+CACHE_DIR = _environment_path(
+    "MAMA_CACHE_DIR",
+    BASE_DIR / "cache",
+)
+MODEL_DIR = _environment_path(
+    "MAMA_MODEL_DIR",
+    BASE_DIR / "models",
+)
+TEMP_DIR = _environment_path(
+    "MAMA_TEMP_DIR",
+    BASE_DIR / "temp",
+)
 
 
 # =====================================================

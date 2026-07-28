@@ -1,0 +1,51 @@
+name: mama-ai-dev
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: mama-ai-backend:dev
+    env_file:
+      - ./backend/.env
+    environment:
+      ENVIRONMENT: development
+      DEBUG: "True"
+      HOST: 0.0.0.0
+      PORT: "8000"
+      MAMA_CONTAINER_MODE: "True"
+      MAMA_DEPLOYMENT_VALIDATE_ENV: "False"
+      MAMA_DEPLOYMENT_REQUIRE_HTTPS: "False"
+      MAMA_DEPLOYMENT_ENABLE_DOCS: "True"
+      MAMA_DATA_DIR: /var/lib/mama-ai/data
+      MAMA_DATABASE_DIR: /var/lib/mama-ai/database
+      MAMA_DATABASE_BACKUP_DIR: /var/lib/mama-ai/backups
+      MAMA_LOG_DIR: /var/log/mama-ai
+      MAMA_CACHE_DIR: /var/cache/mama-ai
+      MAMA_TEMP_DIR: /tmp/mama-ai
+      MAMA_SCREENSHOT_DIR: /var/lib/mama-ai/screenshots
+      MAMA_MODEL_DIR: /var/lib/mama-ai/models
+    command:
+      - python
+      - -m
+      - uvicorn
+      - main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - mama_ai_dev_database:/var/lib/mama-ai/database
+      - mama_ai_dev_backups:/var/lib/mama-ai/backups
+      - mama_ai_dev_logs:/var/log/mama-ai
+    init: true
+    stop_grace_period: 30s
+
+volumes:
+  mama_ai_dev_database:
+  mama_ai_dev_backups:
+  mama_ai_dev_logs:
