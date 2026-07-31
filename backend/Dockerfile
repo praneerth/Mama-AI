@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM python:3.10-slim-bookworm AS builder
+FROM python:3.14-slim-bookworm AS builder
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -17,7 +17,7 @@ COPY requirements-prod.txt ./requirements-prod.txt
 RUN python -m pip install --upgrade pip wheel \
     && python -m pip wheel --wheel-dir /wheels --requirement requirements-prod.txt
 
-FROM python:3.10-slim-bookworm AS runtime
+FROM python:3.14-slim-bookworm AS runtime
 
 ARG MAMA_UID=10001
 ARG MAMA_GID=10001
