@@ -1,0 +1,62 @@
+{
+  "name": "default",
+  "description": "Safe general desktop cursor, click, scroll, and drag controls.",
+  "auto_select": false,
+  "priority": 0,
+  "window_title_patterns": [],
+  "actions": {
+    "point": {
+      "action": "mouse.move",
+      "dwell_ms": 0,
+      "cooldown_ms": 0
+    },
+    "pinch_index": {
+      "action": "mouse.click",
+      "parameters": {
+        "button": "left",
+        "clicks": 1
+      },
+      "dwell_ms": 90,
+      "cooldown_ms": 350
+    },
+    "pinch_middle": {
+      "action": "mouse.click",
+      "parameters": {
+        "button": "right",
+        "clicks": 1
+      },
+      "dwell_ms": 110,
+      "cooldown_ms": 450
+    },
+    "pinch_ring": {
+      "action": "mouse.click",
+      "parameters": {
+        "button": "left",
+        "clicks": 2
+      },
+      "dwell_ms": 130,
+      "cooldown_ms": 650
+    },
+    "two_finger": {
+      "action": "mouse.scroll",
+      "dwell_ms": 0,
+      "cooldown_ms": 0
+    },
+    "fist": {
+      "action": "mouse.down",
+      "parameters": {
+        "button": "left"
+      },
+      "dwell_ms": 240,
+      "cooldown_ms": 600
+    },
+    "open_palm": {
+      "action": "mouse.up",
+      "parameters": {
+        "button": "left"
+      },
+      "dwell_ms": 100,
+      "cooldown_ms": 100
+    }
+  }
+}

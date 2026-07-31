@@ -1,0 +1,50 @@
+{
+  "name": "presentation",
+  "description": "Presentation navigation with open-palm swipes.",
+  "auto_select": true,
+  "priority": 30,
+  "window_title_patterns": [
+    "PowerPoint",
+    "Google Slides",
+    "LibreOffice Impress"
+  ],
+  "actions": {
+    "point": {"action": "mouse.move", "dwell_ms": 0, "cooldown_ms": 0},
+    "pinch_index": {
+      "action": "mouse.click",
+      "parameters": {"button": "left", "clicks": 1},
+      "dwell_ms": 100,
+      "cooldown_ms": 400
+    },
+    "open_palm": {
+      "action": "mouse.up",
+      "parameters": {"button": "left"},
+      "dwell_ms": 100,
+      "cooldown_ms": 100
+    },
+    "swipe_left": {
+      "action": "keyboard.press",
+      "parameters": {"key": "left"},
+      "dwell_ms": 0,
+      "cooldown_ms": 700
+    },
+    "swipe_right": {
+      "action": "keyboard.press",
+      "parameters": {"key": "right"},
+      "dwell_ms": 0,
+      "cooldown_ms": 700
+    },
+    "swipe_up": {
+      "action": "keyboard.press",
+      "parameters": {"key": "pageup"},
+      "dwell_ms": 0,
+      "cooldown_ms": 700
+    },
+    "swipe_down": {
+      "action": "keyboard.press",
+      "parameters": {"key": "pagedown"},
+      "dwell_ms": 0,
+      "cooldown_ms": 700
+    }
+  }
+}

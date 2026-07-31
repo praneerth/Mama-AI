@@ -1,0 +1,7 @@
+# Dedicated Windows hand-gesture environment only.
+# Install exactly one OpenCV wheel to avoid cv2 namespace conflicts.
+numpy==1.26.4
+mediapipe==0.10.21
+opencv-contrib-python==4.11.0.86
+pyautogui>=0.9.54,<1
+python-dotenv>=1,<2

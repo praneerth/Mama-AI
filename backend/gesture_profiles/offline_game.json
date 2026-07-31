@@ -1,0 +1,39 @@
+{
+  "name": "offline_game",
+  "description": "Manual opt-in keyboard mapping for compatible offline games.",
+  "auto_select": false,
+  "priority": 0,
+  "window_title_patterns": [],
+  "actions": {
+    "swipe_left": {
+      "action": "keyboard.press",
+      "parameters": {"key": "left"},
+      "dwell_ms": 0,
+      "cooldown_ms": 280
+    },
+    "swipe_right": {
+      "action": "keyboard.press",
+      "parameters": {"key": "right"},
+      "dwell_ms": 0,
+      "cooldown_ms": 280
+    },
+    "swipe_up": {
+      "action": "keyboard.press",
+      "parameters": {"key": "up"},
+      "dwell_ms": 0,
+      "cooldown_ms": 280
+    },
+    "swipe_down": {
+      "action": "keyboard.press",
+      "parameters": {"key": "down"},
+      "dwell_ms": 0,
+      "cooldown_ms": 280
+    },
+    "pinch_index": {
+      "action": "keyboard.press",
+      "parameters": {"key": "space"},
+      "dwell_ms": 80,
+      "cooldown_ms": 350
+    }
+  }
+}

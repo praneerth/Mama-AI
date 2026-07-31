@@ -1,0 +1,106 @@
+{
+  "name": "browser",
+  "description": "Desktop controls plus safe browser tab and page navigation.",
+  "auto_select": true,
+  "priority": 20,
+  "window_title_patterns": [
+    "Google Chrome",
+    "Microsoft Edge",
+    "Mozilla Firefox",
+    "Brave"
+  ],
+  "actions": {
+    "point": {
+      "action": "mouse.move",
+      "dwell_ms": 0,
+      "cooldown_ms": 0
+    },
+    "pinch_index": {
+      "action": "mouse.click",
+      "parameters": {
+        "button": "left",
+        "clicks": 1
+      },
+      "dwell_ms": 90,
+      "cooldown_ms": 350
+    },
+    "pinch_middle": {
+      "action": "mouse.click",
+      "parameters": {
+        "button": "right",
+        "clicks": 1
+      },
+      "dwell_ms": 110,
+      "cooldown_ms": 450
+    },
+    "pinch_ring": {
+      "action": "mouse.click",
+      "parameters": {
+        "button": "left",
+        "clicks": 2
+      },
+      "dwell_ms": 130,
+      "cooldown_ms": 650
+    },
+    "two_finger": {
+      "action": "mouse.scroll",
+      "dwell_ms": 0,
+      "cooldown_ms": 0
+    },
+    "fist": {
+      "action": "mouse.down",
+      "parameters": {
+        "button": "left"
+      },
+      "dwell_ms": 240,
+      "cooldown_ms": 600
+    },
+    "open_palm": {
+      "action": "mouse.up",
+      "parameters": {
+        "button": "left"
+      },
+      "dwell_ms": 100,
+      "cooldown_ms": 100
+    },
+    "swipe_left": {
+      "action": "keyboard.hotkey",
+      "parameters": {
+        "keys": [
+          "ctrl",
+          "shift",
+          "tab"
+        ]
+      },
+      "dwell_ms": 0,
+      "cooldown_ms": 700
+    },
+    "swipe_right": {
+      "action": "keyboard.hotkey",
+      "parameters": {
+        "keys": [
+          "ctrl",
+          "tab"
+        ]
+      },
+      "dwell_ms": 0,
+      "cooldown_ms": 700
+    },
+    "swipe_up": {
+      "action": "keyboard.press",
+      "parameters": {
+        "key": "pageup"
+      },
+      "dwell_ms": 0,
+      "cooldown_ms": 600
+    },
+    "swipe_down": {
+      "action": "keyboard.press",
+      "parameters": {
+        "key": "pagedown"
+      },
+      "dwell_ms": 0,
+      "cooldown_ms": 600
+    }
+  }
+}
